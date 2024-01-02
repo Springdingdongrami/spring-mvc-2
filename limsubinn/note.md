@@ -620,10 +620,10 @@
         
         ```
         # 수정 전
-        distributionUrl=https\:*//services.gradle.org/distributions/gradle-7.2-bin.zip
+        distributionUrl=https\://services.gradle.org/distributions/gradle-7.2-bin.zip
         
         # 수정 후
-        distributionUrl=https\:*//services.gradle.org/distributions/gradle-7.6-bin.zip
+        distributionUrl=https\://services.gradle.org/distributions/gradle-7.6-bin.zip
         ```
         
 
@@ -873,3 +873,241 @@
     ```
     
     ** `@ModelAttribute` 가 있는 `deliveryCodes()` 메서드는 컨트롤러가 호출 될 때 마다 사용되므로 `deliveryCodes` 객체도 계속 생성된다. 이런 부분은 미리 생성해두고 재사용하는 것이 더 효율적이다.
+
+# 3. 메시지, 국제화
+
+### 프로젝트 설정
+
+- message-start(타임리프 - 스프링 통합과 폼) → message
+- 스프링 부트 & 자바 버전 바꾸기
+    - Settings → Build, Execution, Deployment
+        - Build Tools → Gradle → JVM 버전 변경
+        - Compiler → Java Compiler → Project bytecode version 변경
+    - Project Structure → Project Settings → Project → SDK 버전 변경
+    - build.gradle
+        
+        ```
+        plugins {
+        	id 'org.springframework.boot' version '3.2.1'
+        	id 'io.spring.dependency-management' version '1.1.4'
+        	id 'java'
+        }
+        
+        group = 'hello'
+        version = '0.0.1-SNAPSHOT'
+        
+        java {
+        	sourceCompatibility = '17'
+        }
+        
+        configurations {
+        	compileOnly {
+        		extendsFrom annotationProcessor
+        	}
+        }
+        
+        repositories {
+        	mavenCentral()
+        }
+        
+        dependencies {
+        	implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
+        	implementation 'org.springframework.boot:spring-boot-starter-web'
+        	compileOnly 'org.projectlombok:lombok'
+        	annotationProcessor 'org.projectlombok:lombok'
+        	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+        }
+        
+        tasks.named('test') {
+        	useJUnitPlatform()
+        }
+        ```
+        
+- PermittedSubclasses requires ASM9 에러
+    - gradle/wrapper/gradle-wrapper.properties
+        
+        ```
+        # 수정 전
+        distributionUrl=https\://services.gradle.org/distributions/gradle-6.8.2-bin.zip
+        
+        # 수정 후
+        distributionUrl=https\://services.gradle.org/distributions/gradle-7.6-bin.zip
+        ```
+        
+
+### 메시지, 국제화 소개
+
+- 메시지
+    - 다양한 메시지를 한 곳에서 관리하도록 하는 기능
+    - 예) `messages.properties` 라는 메시지 관리용 파일을 만들고
+        
+        ```
+        item=상품
+        item.id=상품 ID
+        item.itemName=상품명
+        item.price=가격
+        item.quantity=수량
+        ```
+        
+        각 HTML들은 다음과 같이 해당 데이터를 key 값으로 불러서 사용하는 것이다.
+        
+        ```html
+        <!-- addForm.html -->
+        <label for="itemName" th:text="#{item.itemName}"></label>
+        
+        <!-- editForm.html -->
+        <label for="itemName" th:text="#{item.itemName}"></label>
+        ```
+        
+
+- 국제화
+    - 메시지에서 한 발 더 나가서, 메시지에서 설명한 메시지 파일(`message.properties`)을 각 나라별로 별도로 관리하면 서비스를 국제화 할 수 있다.
+    - 예) 다음과 같이 2개의 파일을 만들어서 분류한다.
+        
+        ```
+        <messages_en.properties>
+        item=Item
+        item.id=Item ID
+        item.itemName=Item Name
+        item.price=price
+        item.quantity=quantity
+        
+        <messages_ko.properties>
+        item=상품
+        item.id=상품 ID
+        item.itemName=상품명
+        item.price=가격
+        item.quantity=수량
+        ```
+        
+
+- 메시지와 국제화 기능을 직접 구현할 수도 있겠지만, 스프링은 기본적인 메시지와 국제화 기능을 모두 제공한다. 그리고 타임리프도 스프링이 제공하는 메시지와 국제화 기능을 편리하게 통합해서 제공한다.
+
+### 스프링 메시지 소스 설정
+
+- 메시지 관리 기능을 사용하려면 스프링이 제공하는 `MessageSource` 를 스프링 빈으로 등록하면 되는데, `MessageSource` 는 인터페이스이다. 따라서 구현체인 `ResourceBundleMessageSource` 를 스프링 빈으로 등록하면 된다.
+    
+    ```java
+    @Bean
+    public MessageSource messageSource() {
+    		ResourceBundleMessageSource messageSource = new ResourceBundleMessageSource();
+        messageSource.setBasenames("messages", "errors");
+        messageSource.setDefaultEncoding("utf-8");
+        return messageSource;
+    }
+    ```
+    
+    - `basenames` : 설정 파일의 이름을 지정한다.
+        - `messages` 로 지정하면 `messages.properties` 파일을 읽어서 사용한다.
+        - 추가로 국제화 기능을 적용하려면 `messages_en.properties` , `messages_ko.properties` 와 같이 파일명 마지막에 언어 정보를 주면 된다. 만약 찾을 수 있는 국제화 파일이 없으면 `messages.properties` (언어정보가 없는 파일명)를 기본으로 사용한다.
+        - 파일의 위치는 `/resources/messages.properties` 에 두면 된다.
+        - 여러 파일을 한번에 지정할 수 있다. 여기서는 `messages` , `errors` 둘을 지정했다.
+    - `defaultEncoding` : 인코딩 정보를 지정한다. `utf-8` 을 사용하면 된다.
+
+- 스프링 부트를 사용하면 스프링 부트가 `MessageSource` 를 자동으로 스프링 빈으로 등록한다.
+    - 메시지 소스 설정 (application.properties)
+    `spring.messages.basename=messages,config.i18n.messages`
+    - 메시지 소스 기본 값
+    `spring.messages.basename=messages`
+
+- 메시지 파일 만들기
+    - /resources/messages.properties
+        
+        ```
+        hello=안녕
+        hello.name=안녕 {0}
+        ```
+        
+    - /resources/messages_en.properties
+        
+        ```
+        hello=hello
+        hello.name=hello {0}
+        ```
+        
+
+### 스프링 메시지 소스 사용
+
+- `MessageSource` 인터페이스를 보면 코드를 포함한 일부 파라미터로 메시지를 읽어오는 기능을 제공한다.
+    
+    ```java
+    public interface MessageSource {
+         String getMessage(String code, @Nullable Object[] args, @Nullable String defaultMessage, Locale locale);
+         String getMessage(String code, @Nullable Object[] args, Locale locale)throws NoSuchMessageException;
+    }
+    ```
+    
+
+- `ms.getMessage("hello", null, null)`
+    - code: hello, args: null, locale: null
+    - `Locale` 정보가 없는 경우 `Locale.getDefault()` 을 호출해서 시스템의 기본 로케일을 사용한다.
+    예) locale = null 인 경우 시스템 기본 locale 이 ko_KR 이므로 `messages_ko.properties` 조회 시도 → 조회 실패 → `messages.properties` 조회
+
+- properties 파일 UTF-8 인코딩
+    
+    ![image](https://github.com/Springdingdongrami/spring-mvc-2/assets/66028419/8fd3b283-8df7-47a8-9deb-bbfdcba75a81)
+
+    
+    - Settings - Editor - File Encodings - Properties Files
+
+### 웹 애플리케이션에 메시지 적용하기
+
+- application.properties
+    
+    ```
+    hello=안녕
+    hello.name=안녕 {0}
+    
+    label.item=상품
+    label.item.id=상품 ID
+    label.item.itemName=상품명
+    label.item.price=가격
+    label.item.quantity=수량
+    
+    page.items=상품 목록
+    page.item=상품 상세
+    page.addItem=상품 등록
+    page.updateItem=상품 수정
+    
+    button.save=저장
+    button.cancel=취소
+    ```
+    
+
+- 타임리프의 메시지 표현식 `#{…}`를 사용하면 스프링의 메시지를 편리하게 조회할 수 있다.
+    - 예) 방금 등록한 상품이라는 이름을 조회하려면 `#{label.item}` 이라고 하면 된다.
+
+### 웹 애플리케이션에 국제화 적용하기
+
+- messages_en.properties - 영어 메시지 추가
+    
+    ```
+    hello=hello
+    hello.name=hello {0}
+    
+    label.item=Item
+    label.item.id=Item ID
+    label.item.itemName=Item Name
+    label.item.price=price
+    label.item.quantity=quantity
+    
+    page.items=Item List
+    page.item=Item Detail
+    page.addItem=Item Add
+    page.updateItem=Item Update
+    
+    button.save=Save
+    button.cancel=Cancel
+    ```
+    
+
+- 웹으로 확인하기
+    - 웹 브라우저의 언어 설정 값을 변경하면서 국제화 적용을 확인해보자.
+    - 크롬 브라우저 설정 언어를 검색하고, 우선 순위를 변경하면 된다.
+    - 웹 브라우저의 언어 설정 값을 변경하면 요청시 `Accept-Language` 의 값이 변경된다.
+
+- 스프링의 국제화 메시지 선택
+    - 메시지 기능은 `Locale` 정보를 알아야 언어를 선택할 수 있다.
+    - 스프링도 `Locale` 정보를 알아야 언어를 선택할 수 있는데, 스프링은 언어 선택시 기본으로 `Accept-Language` 헤더의 값을 사용한다.
+    - 스프링은 `Locale` 선택 방식을 변경할 수 있도록 `LocaleResolver` 라는 인터페이스를 제공하는데, 스프링 부트는 기본으로 `Accept-Language` 를 활용하는 `AcceptHeaderLocaleResolver` 를 사용한다.
+    - 만약 `Locale` 선택 방식을 변경하려면 `LocaleResolver` 의 구현체를 변경해서 쿠키나 세션 기반의 `Locale` 선택 기능을 사용할 수 있다. 예를 들어서 고객이 직접 `Locale` 을 선택하도록 하는 것이다.
