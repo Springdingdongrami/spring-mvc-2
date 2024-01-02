@@ -565,3 +565,311 @@
     
     - **layoutFile.html** 을 보면 기본 레이아웃을 가지고 있는데, `<html>` 에 `th:fragment` 속성이 정의되어 있다. 이 레이아웃 파일을 기본으로 하고 여기에 필요한 내용을 전달해서 부분부분 변경하는 것으로 이해하면 된다.
     - **layoutExtendMain.html** 는 현재 페이지인데, `<html>` 자체를 `th:replace` 를 사용해서 변경하는 것을 확인 할 수 있다. 결국 **layoutFile.html** 에 필요한 내용을 전달하면서 `<html>` 자체를 **layoutFile.html** 로 변경 한다.
+
+# 2. 타임리프 - 스프링 통합과 폼
+
+### 프로젝트 설정
+
+- form-start(mvc 1편) → form
+- 스프링 부트 & 자바 버전 바꾸기
+    - Settings → Build, Execution, Deployment
+        - Build Tools → Gradle → JVM 버전 변경
+        - Compiler → Java Compiler → Project bytecode version 변경
+    - Project Structure → Project Settings → Project → SDK 버전 변경
+    - build.gradle
+        
+        ```
+        plugins {
+        	id 'org.springframework.boot' version '3.2.1'
+        	id 'io.spring.dependency-management' version '1.1.4'
+        	id 'java'
+        }
+        
+        group = 'hello'
+        version = '0.0.1-SNAPSHOT'
+        
+        java {
+        	sourceCompatibility = '17'
+        }
+        
+        configurations {
+        	compileOnly {
+        		extendsFrom annotationProcessor
+        	}
+        }
+        
+        repositories {
+        	mavenCentral()
+        }
+        
+        dependencies {
+        	implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
+        	implementation 'org.springframework.boot:spring-boot-starter-web'
+        	compileOnly 'org.projectlombok:lombok'
+        	annotationProcessor 'org.projectlombok:lombok'
+        	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+        }
+        
+        tasks.named('test') {
+        	useJUnitPlatform()
+        }
+        ```
+        
+- PermittedSubclasses requires ASM9 에러
+    - gradle/wrapper/gradle-wrapper.properties
+        
+        ```
+        # 수정 전
+        distributionUrl=https\:*//services.gradle.org/distributions/gradle-7.2-bin.zip
+        
+        # 수정 후
+        distributionUrl=https\:*//services.gradle.org/distributions/gradle-7.6-bin.zip
+        ```
+        
+
+### 타임리프 스프링 통합
+
+- 타임리프는 스프링 없이도 동작하지만, 스프링과 통합을 위한 다양한 기능을 편리하게 제공한다.
+    - 스프링의 SpringEL 문법 통합
+    - `${@myBean.doSomething()}` 처럼 스프링 빈 호출 지원
+    - 편리한 폼 관리를 위한 추가 속성
+        - `th:object` (기능 강화, 폼 커맨드 객체 선택)
+        - `th:field` , `th:errors` , `th:errorclass`
+    - 폼 컴포넌트 기능
+        - checkbox, radio button, List 등을 편리하게 사용할 수 있는 기능 지원
+        - 스프링의 메시지, 국제화 기능의 편리한 통합
+        - 스프링의 검증, 오류 처리 통합
+        - 스프링의 변환 서비스 통합(ConversionService)
+
+- 스프링 부트는 타임리프 템플릿 엔진을 스프링 빈에 등록하고, 타임리프용 뷰 리졸버를 스프링 빈으로 등록하는 부분을 모두 자동화해준다.
+    - `implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'`
+    - Gradle은 타임리프와 관련된 라이브러리를 다운로드 받고, 스프링 부트는 타임리프와 관련된 설정용 스프링 빈을 자동으로 등록해준다.
+
+** 타임리프 기본 메뉴얼: [https://www.thymeleaf.org/doc/tutorials/3.0/usingthymeleaf.html](https://www.thymeleaf.org/doc/tutorials/3.0/usingthymeleaf.html)
+
+** 타임리프 스프링 통합 메뉴얼: [https://www.thymeleaf.org/doc/tutorials/3.0/thymeleafspring.html](https://www.thymeleaf.org/doc/tutorials/3.0/thymeleafspring.html) 
+
+### 입력 폼 처리
+
+- 입력 폼 처리
+    - `th:object` : 커맨드 객체 지정
+    - `*{…}` : 선택 변수 식 → **th:object**에서 선택한 객체에 접근
+    - `th:field` : HTML 태그의 **id**, **name**, **value** 속성을 자동으로 처리
+
+- 등록 폼
+    - `th:object` 를 적용하려면 먼저 해당 오브젝트 정보를 넘겨주어야 한다. 등록 폼이기 때문에 데이터가 비어있는 빈 오브젝트를 만들어서 뷰에 전달하자.
+        
+        ```java
+        @GetMapping("/add")
+        public String addForm(Model model) {
+            model.addAttribute("item", new Item());
+            return "form/addForm";
+        }
+        ```
+        
+    - 타임리프 등록 폼
+        
+        ```html
+        <form action="item.html" th:action th:object="${item}" method="post">
+            <div>
+                <label for="itemName">상품명</label>
+                <input type="text" id="itemName" th:field="*{itemName}" class="form-control" placeholder="이름을 입력하세요">
+            </div>
+            <div>
+                <label for="price">가격</label>
+                <input type="text" id="price" th:field="*{price}" class="form-control" placeholder="가격을 입력하세요">
+            </div>
+            <div>
+                <label for="quantity">수량</label>
+                <input type="text" id="quantity" th:field="*{quantity}" class="form-control" placeholder="수량을 입력하세요">
+            </div>
+        		...
+        </form>
+        ```
+        
+
+- 수정 폼
+    
+    ```html
+    <form action="item.html" th:action th:object="${item}" method="post">
+        <div>
+            <label for="id">상품 ID</label>
+            <input type="text" id="id" class="form-control" th:field="*{id}" readonly>
+        </div>
+        <div>
+            <label for="itemName">상품명</label>
+            <input type="text" id="itemName" class="form-control" th:field="*{itemName}">
+        </div>
+        <div>
+            <label for="price">가격</label>
+            <input type="text" id="price" class="form-control" th:field="*{price}">
+        </div>
+        <div>
+            <label for="quantity">수량</label>
+            <input type="text" id="quantity" class="form-control" th:field="*{quantity}">
+        </div>
+    		...
+    </form>
+    ```
+    
+
+### 요구사항 추가
+
+- 요구사항 추가
+    - 판매 여부
+        - 판매 오픈 여부
+        - 체크 박스로 선택
+    - 등록 지역
+        - 서울, 부산, 제주
+        - 체크 박스로 다중 선택
+    - 상품 종류
+        - 도서, 식품, 기타
+        - 라디오 버튼으로 하나만 선택
+    - 배송 방식
+        - 빠른/일반/느린
+        - 셀렉트 박스로 하나만 선택
+
+- ItemType (상품 종류)
+    - enum class
+    - 설명을 위해 description 필드 추가
+
+- DeliveryCode (배송 방식)
+    - code: `FAST` 같은 시스템에서 전달하는 값
+    - displayName: `빠른 배송` 같은 고객에게 보여주는 값
+
+- Item (상품)
+    - ENUM , 클래스, String 같은 다양한 상황을 준비
+
+### 체크 박스 - 단일 1
+
+- 히든 필드
+    - HTML checkbox는 선택이 안되면 클라이언트에서 서버로 값 자체를 보내지 않는다.
+        
+        ```java
+        // 실행 로그
+        FormItemController     : item.open=true // 체크 박스 선택 O
+        FormItemController     : item.open=null // 체크 박스 선택 X
+        ```
+        
+    - 이런 문제를 해결하기 위해서 스프링 MVC는 약간의 트릭을 사용하는데, 히든 필드를 하나 만들어서, `_open` 처럼 기존 체크 박스 이름 앞에 언더스코어(`_`)를 붙여서 전송하면 체크를 해제했다고 인식할 수 있다.
+    - 히든 필드는 항상 전송된다.
+    - 따라서 체크를 해제한 경우 여기에서 `open` 은 전송되지 않고, `_open` 만 전송되는데, 이 경우 스프링 MVC는 체크를 해제했다고 판단한다.
+        
+        ```java
+        // 실행 로그
+        FormItemController     : item.open=true // 체크 박스 선택 O
+        FormItemController     : item.open=false // 체크 박스 선택 X
+        ```
+        
+        - 체크 박스를 체크하면 스프링 MVC가 `open` 에 값이 있는 것을 확인하고 사용한다. 이때 `_open` 은 무시한다.
+        - 체크 박스를 체크하지 않으면 스프링 MVC가 `_open` 만 있는 것을 확인하고, `open` 의 값이 체크되지 않았다고 인식한다.
+
+### 체크 박스 - 단일 2
+
+- 개발할 때마다 이렇게 히든 필드를 추가하는 것은 상당히 번거롭다. 타임리프가 제공하는 폼 기능을 사용하면 이런 부분을 자동으로 처리할 수 있다.
+    - 상품 추가, 상품 상세, 상품 수정 html 코드에 적용
+    - ItemRepository → update 수정
+
+### 체크 박스 - 멀티
+
+- FormItemController에 추가
+    
+    ```java
+    @ModelAttribute("regions")
+    public Map<String, String> regions() {
+        Map<String, String> regions = new LinkedHashMap<>();
+        regions.put("SEOUL", "서울");
+        regions.put("BUSAN", "부산");
+        regions.put("JEJU", "제주");
+        return regions;
+    }
+    ```
+    
+    - 등록 폼, 상세화면, 수정 폼에서 모두 <서울, 부산, 제주>라는 체크 박스를 반복해서 보여주어야 한다.
+    - 이렇게 하려면 각각의 컨트롤러에서 `model.addAttribute(...)`을 사용해서 체크 박스를 구성하는 데이터를 반복해서 넣어주어야 한다.
+    - `@ModelAttribute`는 이렇게 컨트롤러에 있는 별도의 메서드에 적용할 수 있다.
+    - 이렇게하면 해당 컨트롤러를 요청할 때 `regions`에서 반환한 값이 자동으로 모델(`model`)에 담기게 된다.
+
+- 멀티 체크박스
+    
+    ```html
+    <!-- multi checkbox -->
+    <div>
+        <div>등록 지역</div>
+        <div th:each="region : ${regions}" class="form-check form-check-inline">
+            <input type="checkbox" th:field="*{regions}" th:value="${region.key}" class="form-check-input">
+            <label th:for="${#ids.prev('regions')}"
+                   th:text="${region.value}" class="form-check-label">서울</label>
+        </div>
+    </div>
+    ```
+    
+    - `th:for="${#ids.prev('regions')}"`
+    - 멀티 체크박스는 같은 이름의 여러 체크박스를 만들 수 있다.
+    - 이렇게 반복해서 HTML 태그를 생성할 때, 생성된 HTML 태그 속성에서 `name`은 같아도 되지만, `id`는 모두 달라야 한다.
+    - 따라서 타임리프는 체크박스를 `each` 루프 안에서 반복해서 만들 때 임의로 `1`, `2`, `3` 숫자를 뒤에 붙여준다.
+        
+        ```html
+        <input type="checkbox" value="SEOUL" class="form-check-input" id="regions1" name="regions">
+        <input type="checkbox" value="BUSAN" class="form-check-input" id="regions2" name="regions">
+        <input type="checkbox" value="JEJU" class="form-check-input" id="regions3" name="regions">
+        ```
+        
+    - 타임리프는 `ids.prev(...)`, `ids.next(...)` 을 제공해서 동적으로
+    생성되는 `id` 값을 사용할 수 있도록 한다.
+    - 타임리프 HTML 생성 결과
+        
+        ```html
+        <!-- multi checkbox -->
+        <div>
+            <div>등록 지역</div>
+            <div class="form-check form-check-inline">
+                <input type="checkbox" value="SEOUL" class="form-check-input" id="regions1" name="regions"><input type="hidden" name="_regions" value="on"/>
+                <label for="regions1"
+                       class="form-check-label">서울</label>
+            </div>
+            <div class="form-check form-check-inline">
+                <input type="checkbox" value="BUSAN" class="form-check-input" id="regions2" name="regions"><input type="hidden" name="_regions" value="on"/>
+                <label for="regions2"
+                       class="form-check-label">부산</label>
+            </div>
+            <div class="form-check form-check-inline">
+                <input type="checkbox" value="JEJU" class="form-check-input" id="regions3" name="regions"><input type="hidden" name="_regions" value="on"/>
+                <label for="regions3"
+                       class="form-check-label">제주</label>
+            </div>
+        </div>
+        ```
+        
+
+### 라디오 버튼
+
+- FormItemController에 추가
+    
+    ```java
+    @ModelAttribute("itemTypes")
+    public ItemType[] itemTypes() {
+        return ItemType.values();
+    }
+    ```
+    
+    - `ItemType.values()` 를 사용하면 해당 ENUM의 모든 정보를 배열로 반환한다. 예) `[BOOK, FOOD, ETC]`
+
+** 라디오 버튼은 이미 선택이 되어 있다면, 수정시에도 항상 하나를 선택하도록 되어 있으므로 체크 박스와 달리 별도의 히든 필드를 사용할 필요가 없다.
+
+### 셀렉트 박스
+
+- FormItemController에 추가
+    
+    ```java
+    @ModelAttribute("deliveryCodes")
+    public List<DeliveryCode> deliveryCodes() {
+        List<DeliveryCode> deliveryCodes = new ArrayList<>();
+        deliveryCodes.add(new DeliveryCode("FAST", "빠른 배송"));
+        deliveryCodes.add(new DeliveryCode("NORMAL", "일반 배송"));
+        deliveryCodes.add(new DeliveryCode("SLOW", "느린 배송"));
+        return deliveryCodes;
+    }
+    ```
+    
+    ** `@ModelAttribute` 가 있는 `deliveryCodes()` 메서드는 컨트롤러가 호출 될 때 마다 사용되므로 `deliveryCodes` 객체도 계속 생성된다. 이런 부분은 미리 생성해두고 재사용하는 것이 더 효율적이다.
