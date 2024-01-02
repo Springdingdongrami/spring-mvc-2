@@ -63,6 +63,19 @@
         </div>
     </div>
 
+    <!-- radio button -->
+    <div>
+        <div>상품 종류</div>
+        <div th:each="type : ${itemTypes}" class="form-check form-check-inline">
+            <!-- th:object 를 사용하지 않았기 때문에 ${item.itemType} 으로 적어 주어야 한다. -->
+            <!-- disabled 를 사용해서 상품 상세에서는 라디어 버튼이 선택되지 않도록 했다. -->
+            <input type="radio" th:field="${item.itemType}" th:value="${type.name()}" class="form-check-input" disabled>
+            <label th:for="${#ids.prev('itemType')}" th:text="${type.description}" class="form-check-label">
+                BOOK
+            </label>
+        </div>
+    </div>
+
     <div class="row">
         <div class="col">
             <button class="w-100 btn btn-primary btn-lg"
