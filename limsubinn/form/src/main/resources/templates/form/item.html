@@ -38,6 +38,18 @@
         <input type="text" id="quantity" name="quantity" class="form-control" value="10" th:value="${item.quantity}" readonly>
     </div>
 
+    <!-- SELECT -->
+    <div>
+        <div>배송 방식</div>
+        <!-- th:object 를 사용하지 않았기 때문에 ${item.deliveryCode} 으로 적어주어야 한다. -->
+        <!-- disabled 를 사용해서 상품 상세에서는 셀렉트 박스가 선택되지 않도록 했다. -->
+        <select th:field="${item.deliveryCode}" class="form-select" disabled>
+            <option value="">==배송 방식 선택==</option>
+            <option th:each="deliveryCode : ${deliveryCodes}" th:value="${deliveryCode.code}"
+                    th:text="${deliveryCode.displayName}">FAST</option>
+        </select>
+    </div>
+
     <hr class="my-4">
 
     <!-- single checkbox -->
