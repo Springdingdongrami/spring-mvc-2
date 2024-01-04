@@ -10,6 +10,7 @@ import org.springframework.util.StringUtils;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.FieldError;
 import org.springframework.validation.ObjectError;
+import org.springframework.validation.ValidationUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.support.RedirectAttributes;
 
@@ -45,10 +46,10 @@ public class ValidationItemControllerV2 {
         return "validation/v2/addForm";
     }
 
-//    @PostMapping("/add")
+    //    @PostMapping("/add")
     public String addItemV1(@ModelAttribute Item item,
-                          BindingResult bindingResult,
-                          RedirectAttributes redirectAttributes) {
+                            BindingResult bindingResult,
+                            RedirectAttributes redirectAttributes) {
         // 검증 로직
         if (!StringUtils.hasText(item.getItemName())) {
             // objectName, field, defaultMessage
@@ -83,7 +84,7 @@ public class ValidationItemControllerV2 {
         return "redirect:/validation/v2/items/{itemId}";
     }
 
-//    @PostMapping("/add")
+    //    @PostMapping("/add")
     public String addItemV2(@ModelAttribute Item item,
                             BindingResult bindingResult,
                             RedirectAttributes redirectAttributes) {
@@ -121,7 +122,7 @@ public class ValidationItemControllerV2 {
         return "redirect:/validation/v2/items/{itemId}";
     }
 
-//    @PostMapping("/add")
+    //    @PostMapping("/add")
     public String addItemV3(@ModelAttribute Item item,
                             BindingResult bindingResult,
                             RedirectAttributes redirectAttributes) {
@@ -167,10 +168,11 @@ public class ValidationItemControllerV2 {
         log.info("target={}", bindingResult.getTarget());
 
         // 검증 로직
-        if (!StringUtils.hasText(item.getItemName())) {
-            // field, required
-            bindingResult.rejectValue("itemName", "required");
-        }
+        ValidationUtils.rejectIfEmptyOrWhitespace(bindingResult, "itemName", "required");
+//        if (!StringUtils.hasText(item.getItemName())) {
+//            // field, required
+//            bindingResult.rejectValue("itemName", "required");
+//        }
         if (item.getPrice() == null || item.getPrice() < 1000 || item.getPrice() > 1_000_000) {
             // field, errorCode, errorArgs, defaultMessage
             bindingResult.rejectValue("price", "range", new Object[]{1000, 1_000_000}, null);
@@ -215,4 +217,5 @@ public class ValidationItemControllerV2 {
     }
 
 }
+
 
