@@ -1111,3 +1111,465 @@
     - 스프링도 `Locale` 정보를 알아야 언어를 선택할 수 있는데, 스프링은 언어 선택시 기본으로 `Accept-Language` 헤더의 값을 사용한다.
     - 스프링은 `Locale` 선택 방식을 변경할 수 있도록 `LocaleResolver` 라는 인터페이스를 제공하는데, 스프링 부트는 기본으로 `Accept-Language` 를 활용하는 `AcceptHeaderLocaleResolver` 를 사용한다.
     - 만약 `Locale` 선택 방식을 변경하려면 `LocaleResolver` 의 구현체를 변경해서 쿠키나 세션 기반의 `Locale` 선택 기능을 사용할 수 있다. 예를 들어서 고객이 직접 `Locale` 을 선택하도록 하는 것이다.
+ 
+
+  # 4. 검증1 - Validation
+
+### 검증 요구사항
+
+- 검증 로직 추가
+    - 타입 검증
+        - 가격, 수량에 문자가 들어가면 검증 오류 처리
+    - 필드 검증
+        - 상품명: 필수, 공백 X
+        - 가격: 1000원 이상, 1백만원 이하
+        - 수량: 최대 9999
+    - 특정 필드의 범위를 넘어서는 검증
+        - 가격 * 수량의 합은 10,000원 이상
+
+** **컨트롤러의 중요한 역할중 하나는 HTTP 요청이 정상인지 검증하는 것이다.**
+
+- 클라이언트 검증 vs 서버 검증
+    - 클라이언트 검증은 조작할 수 있으므로 보안에 취약하다.
+    - 서버만으로 검증하면, 즉각적인 고객 사용성이 부족해진다.
+    - 둘을 적절히 섞어서 사용하되, 최종적으로 서버 검증은 필수
+    - API 방식을 사용하면 API 스펙을 잘 정의해서 검증 오류를 API 응답 결과에 잘 남겨주어야 한다.
+
+### 프로젝트 설정 V1
+
+- validation-start → validation
+    - 스프링 부트 & 자바 버전 바꾸기
+        - Settings → Build, Execution, Deployment
+            - Build Tools → Gradle → JVM 버전 변경
+            - Compiler → Java Compiler → Project bytecode version 변경
+        - Project Structure → Project Settings → Project → SDK 버전 변경
+        - build.gradle
+            
+            ```
+            plugins {
+            	id 'org.springframework.boot' version '3.2.1'
+            	id 'io.spring.dependency-management' version '1.1.4'
+            	id 'java'
+            }
+            
+            group = 'hello'
+            version = '0.0.1-SNAPSHOT'
+            
+            java {
+            	sourceCompatibility = '17'
+            }
+            
+            configurations {
+            	compileOnly {
+            		extendsFrom annotationProcessor
+            	}
+            }
+            
+            repositories {
+            	mavenCentral()
+            }
+            
+            dependencies {
+            	implementation 'org.springframework.boot:spring-boot-starter-thymeleaf'
+            	implementation 'org.springframework.boot:spring-boot-starter-web'
+            	compileOnly 'org.projectlombok:lombok'
+            	annotationProcessor 'org.projectlombok:lombok'
+            	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+            }
+            
+            tasks.named('test') {
+            	useJUnitPlatform()
+            }
+            ```
+            
+- PermittedSubclasses requires ASM9 에러
+    - gradle/wrapper/gradle-wrapper.properties
+        
+        ```
+        # 수정 전
+        distributionUrl=https\://services.gradle.org/distributions/gradle-6.8.2-bin.zip
+        
+        # 수정 후
+        distributionUrl=https\://services.gradle.org/distributions/gradle-7.6-bin.zip
+        ```
+        
+
+### 검증 직접 처리
+
+- 상품 저장 성공
+    
+    ![image](https://github.com/Springdingdongrami/spring-mvc-2/assets/66028419/10f9898f-aae2-47f3-a564-5241d23b0de3)
+
+    
+    - 사용자가 상품 등록 폼에서 정상 범위의 데이터를 입력하면, 서버에서는 검증 로직이 통과하고, 상품을 저장하고, 상품 상세 화면으로 redirect
+    
+- 상품 저장 검증 실패
+    
+    ![image](https://github.com/Springdingdongrami/spring-mvc-2/assets/66028419/f63a3a61-afc8-4449-bc85-ad16712d08c1)
+    
+    - 고객이 상품 등록 폼에서 상품명을 입력하지 않거나 가격, 수량 등이 너무 작거나 커서 검증 범위를 넘어서면 서버 검증 로직이 실패해야 한다.
+    - 이렇게 검증에 실패한 경우 고객에게 다시 상품 등록 폼을 보여주고, 어떤 값을 잘못 입력했는지 친절하게 알려주어야 한다.
+    - 검증 오류가 발생해도 고객이 입력한 데이터가 유지된다.
+
+- 검증시 오류가 발생하면 `errors` 에 담아둔다. 이때 어떤 필드에서 오류가 발생했는지 구분하기 위해 오류가 발생한 필드명을 `key` 로 사용한다. 이후 뷰에서 이 데이터를 사용해서 고객에게 친절한 오류 메시지를 출력할 수 있다.
+    - 만약 검증에서 오류 메시지가 하나라도 있으면 오류 메시지를 출력하기 위해 `model` 에 `errors` 를 담고, 입력 폼이 있는 뷰 템플릿으로 보낸다.
+
+- 남은 문제점
+    - 뷰 템플릿에서 중복 처리가 많다.
+    - 타입 오류 처리가 안된다.
+    - 타입 오류가 발생해도 고객이 입력한 문자를 화면에 남겨야 한다.
+    - 결국 고객이 입력한 값도 어딘가에 별도로 관리가 되어야 한다.
+
+### 프로젝트 준비 V2
+
+- ValidationItemControllerV2 컨트롤러 생성
+- 템플릿 파일 복사
+
+### BindingResult1
+
+- 스프링이 제공하는 검증 오류 처리 방법
+    - 필드 오류 - `FieldError` 객체를 생성해서 `BindingResult`에 담아둔다.
+        
+        ```java
+        public FieldError(String objectName, String field, String defaultMessage);
+        ```
+        
+        - `objectName`: @ModelAttribute의 이름
+        - `field`: 오류가 발생한 필드 이름
+        - `defaultMessage`: 오류 기본 메시지
+    - 글로벌 오류 - `ObjectError` 객체를 생성해서 `BindingResult`에 담아둔다.
+        
+        ```java
+        public ObjectError(String objectName, String defaultMessage);
+        ```
+        
+        - `objectName` : @ModelAttribute의 이름
+        - `defaultMessage` : 오류 기본 메시지
+
+- 타임리프 스프링 검증 오류 통합 기능 - `BindingResult` 활용
+    - `#fields`: BindingResult가 제공하는 검증 오류에 접근할 수 있다.
+    - `th:errors`: 해당 필드에 오류가 있는 경우에 태그를 출력한다. `th:if`의 편의 버전이다.
+    - `th:errorclass`: `th:field`에서 지정한 필드에 오류가 있으면 `class` 정보를 추가한다.
+
+- BindingResult
+    - 스프링이 제공하는 검증 오류를 보관하는 객체
+    - `BindingResult`가 있으면 `@ModelAttribute`에 데이터 바인딩 시 오류가 발생해도 컨트롤러가 호출된다. - 오류 정보(`FieldError`)를 `BindingResult`에 담아서 컨트롤러를 정상 호출한다.
+    - `BindingResult`는 검증할 대상 바로 다음에 와야한다. 순서가 중요하다. 예를 들어서 `@ModelAttribute Item item`, 바로 다음에 `BindingResult`가 와야 한다.
+    - `BindingResult`는 `Model`에 자동으로 포함된다.
+
+- BindingResult에 검증 오류를 적용하는 방법
+    - `@ModelAttribute`의 객체에 타입 오류 등으로 바인딩이 실패하는 경우 스프링이 `FieldError` 생성해서 `BindingResult`에 넣어준다.
+    - 개발자가 직접 넣어준다.
+    - `Validator` 사용
+
+- BindingResult와 Errors
+    - `BindingResult`는 인터페이스이고, `Errors` 인터페이스를 상속받고 있다.
+    - `Errors` 인터페이스는 단순한 오류 저장과 조회 기능을 제공한다.
+    - `BindingResult` 는 여기에 더해서 추가적인 기능들을 제공한다.
+
+### FieldError, ObjectError
+
+- 사용자 입력 오류 시 입력한 값이 화면에 남도록 하자.
+
+- FieldError, ObjectError - 2가지 생성자
+    
+    ```java
+    public FieldError(String objectName, String field, String defaultMessage);
+    ```
+    
+    ```java
+    public FieldError(String objectName, String field, @Nullable Object rejectedValue, boolean bindingFailure, @Nullable String[] codes, @Nullable Object[] arguments, @Nullable String defaultMessage);
+    ```
+    
+    - `objectName` : 오류가 발생한 객체 이름
+    - `field` : 오류 필드
+    - `rejectedValue` : 사용자가 입력한 값 (거절된 값)
+    - `bindingFailure` : 타입 오류 같은 바인딩 실패인지 검증 실패인지 구분 값
+    - `codes` : 메시지 코드
+    - `arguments` : 메시지에서 사용하는 인자
+    - `defaultMessage` : 기본 오류 메시지
+
+### 오류 코드와 메시지 처리 1
+
+- 오류메시지를 체계적으로 다루어보자.
+    - `FieldError` , `ObjectError` 의 생성자는 `codes` , `arguments` 를 제공한다.
+    - 이것은 오류 발생시 오류 코드로 메시지를 찾기 위해 사용된다.
+
+- errors 파일 생성 (`errors.properties`)
+    - application.properties → 스프링 부트 메시지 설정 추가
+    `spring.messages.basename=messages,errors`
+    - errors.properties → 오류 메시지 추가
+        
+        ```
+        required.item.itemName=상품 이름은 필수입니다.
+        range.item.price=가격은 {0} ~ {1} 까지 허용합니다.
+        max.item.quantity=수량은 최대 {0} 까지 허용합니다.
+        totalPriceMin=가격 * 수량의 합은 {0}원 이상이어야 합니다. 현재 값 = {1}
+        ```
+        
+
+- addItemV2
+    
+    ```java
+    bindingResult.addError(new FieldError("item", "price", item.getPrice(), false, new String[]{"range.item.price"}, new Object[]{1000, 1000000}, null));
+    ```
+    
+    - `codes` : `required.item.itemName`를 사용해서 메시지 코드를 지정한다. 메시지 코드는 하나가 아니라 배열로 여러 값을 전달할 수 있는데, 순서대로 매칭해서 처음 매칭되는 메시지가 사용된다.
+    - `arguments` : `Object[]{1000, 1000000}`를 사용해서 코드의 `{0}`, `{1}` 로 치환할 값을 전달한다.
+
+### 오류 코드와 메시지 처리 2
+
+- 목표
+    - `FieldError`, `ObjectError`는 다루기 너무 번거롭다.
+    - 오류 코드도 좀 더 자동화하자.
+
+- 컨트롤러에서 `BindingResult`는 검증해야 할 객체인 `target` 바로 다음에 온다. 따라서 `BindingResult`는 이미 본인이 검증해야 할 객체인 `target`을 알고 있다.
+    - `BindingResult`가 제공하는 `rejectValue()`, `reject()`를 사용하면 `FieldError`, `ObjectError`를 직접 생성하지 않고, 깔끔하게 검증 오류를 다룰 수 있다.
+
+- rejectValue
+    
+    ```java
+    void rejectValue(@Nullable String field, String errorCode, @Nullable Object[] errorArgs, @Nullable String defaultMessage);
+    ```
+    
+    - `field` : 오류 필드명
+    - `errorCode` : 오류 코드(이 오류 코드는 메시지에 등록된 코드가 아니다. messageResolver를 위한 오류 코드이다.)
+    - `errorArgs` : 오류 메시지에서 `{0}`을 치환하기 위한 값
+    - `defaultMessage` : 오류 메시지를 찾을 수 없을 때 사용하는 기본 메시지
+    - BindingResult는 어떤 객체를 대상으로 검증하는지 target을 이미 알고 있다고 했다. 따라서 target(item)에 대한 정보는 없어도 된다.
+    
+
+### 오류 코드와 메시지 처리 3
+
+- 오류 코드를 만들 때 자세히 만들 수도 있고,
+    
+    ```
+    required.item.itemName=상품 이름은 필수입니다.
+    range.item.price=가격은 {0} ~ {1} 까지 허용합니다.
+    max.item.quantity=수량은 최대 {0} 까지 허용합니다.
+    totalPriceMin=가격 * 수량의 합은 {0}원 이상이어야 합니다. 현재 값 = {1}
+    ```
+    
+    단순하게 만들 수도 있다.
+    
+    ```
+    required=필수 값 입니다.
+    range=범위는 {0} ~ {1} 까지 허용합니다.
+    max=최대 {0} 까지 허용합니다.
+    ```
+    
+    - 단순하게 만들면 범용성이 좋아 여러곳에서 사용할 수 있지만, 메시지를 세밀하게 작성하기 어렵다.
+    - 반대로 너무 자세하게 만들면 범용성이 떨어진다.
+    - 가장 좋은 방법은 범용성으로 사용하다가, 세밀하게 작성해야 하는 경우에는 세밀한 내용이 적용되도록 메시지에 단계를 두는 방법이다.
+        - 예) `required`라고 오류 코드를 사용
+        다음과 같이 `required`라는 메시지만 있으면 이 메시지를 선택해서 사용한다.
+            
+            ```
+            required: 필수 값 입니다.
+            ```
+            
+            그런데 오류 메시지에 `required.item.itemName`와 같이 객체명과 필드명을 조합한 세밀한 메시지 코드가 있으면 이 메시지를 높은 우선순위로 사용하는 것이다.
+            
+            ```
+            #Level1
+            required.item.itemName: 상품 이름은 필수 입니다. 
+            
+            #Level2
+            required: 필수 값 입니다.
+            ```
+            
+
+### 오류 코드와 메시지 처리 4
+
+- MessageCodesResolver
+    - 검증 오류 코드로 메시지 코드들을 생성한다.
+    - `MessageCodesResolver` 인터페이스이고 `DefaultMessageCodesResolver`는 기본 구현체이다.
+    - 주로 다음과 함께 사용 `ObjectError`, `FieldError`
+
+- DefaultMessageCodesResolver의 기본 메시지 생성 규칙
+    - 객체 오류
+        
+        ```
+        객체 오류의 경우 다음 순서로 2가지 생성 
+        1.: code + "." + object name 
+        2.: code
+        
+        예) 오류 코드: required, object name: item
+        1.: required.item
+        2.: required
+        ```
+        
+    - 필드 오류
+        
+        ```
+        필드 오류의 경우 다음 순서로4가지 메시지 코드 생성 
+        1.: code + "." + object name + "." + field 
+        2.: code + "." + field
+        3.: code + "." + field type
+        4.: code
+        
+        예) 오류 코드: typeMismatch, object name "user", field "age", field type: int 
+        1. "typeMismatch.user.age"
+        2. "typeMismatch.age"
+        3. "typeMismatch.int"
+        4. "typeMismatch"
+        ```
+        
+
+- 동작 방식
+    - `rejectValue()`, `reject()`는 내부에서 `MessageCodesResolver`를 사용한다. 여기에서 메시지 코드들을 생성한다.
+    - `FieldError`, `ObjectError` 의 생성자를 보면, 오류 코드를 하나가 아니라 여러 오류 코드를 가질 수 있다. `MessageCodesResolver`를 통해서 생성된 순서대로 오류 코드를 보관한다.
+
+### 오류 코드와 메시지 처리 5
+
+- 오류 코드 관리 전략
+    - **구체적인 것에서 덜 구체적인 것으로** → 메시지와 관련된 공통 전략을 편리하게 도입할 수 있다.
+    - 크게 중요하지 않은 메시지는 범용성 있는 `requried` 같은 메시지로 끝내고, 정말 중요한 메시지는 꼭 필요할 때 구체 적으로 적어서 사용하는 방식이 더 효과적이다.
+
+- errors.properties → 크게 객체 오류와 필드 오류를 나누었다. 그리고 범용성에 따라 레벨을 나누어두었다.
+    
+    ```
+    #required.item.itemName=상품 이름은 필수입니다.
+    #range.item.price=가격은 {0} ~ {1} 까지 허용합니다.
+    #max.item.quantity=수량은 최대 {0} 까지 허용합니다.
+    #totalPriceMin=가격 * 수량의 합은 {0}원 이상이어야 합니다. 현재 값 = {1}
+    
+    #==ObjectError==
+    #Level1
+    totalPriceMin.item=상품의 가격 * 수량의 합은 {0}원 이상이어야 합니다. 현재 값 = {1}
+    
+    #==FieldError==
+    #Level1
+    required.item.itemName=상품 이름은 필수입니다.
+    range.item.price=가격은 {0} ~ {1} 까지 허용합니다.
+    max.item.quantity=수량은 최대 {0} 까지 허용합니다.
+    
+    #Level2 - 생략
+    
+    #Level3
+    required.java.lang.String = 필수 문자입니다.
+    required.java.lang.Integer = 필수 숫자입니다.
+    min.java.lang.String = {0} 이상의 문자를 입력해주세요.
+    min.java.lang.Integer = {0} 이상의 숫자를 입력해주세요.
+    range.java.lang.String = {0} ~ {1} 까지의 문자를 입력해주세요.
+    range.java.lang.Integer = {0} ~ {1} 까지의 숫자를 입력해주세요.
+    max.java.lang.String = {0} 까지의 문자를 허용합니다.
+    max.java.lang.Integer = {0} 까지의 숫자를 허용합니다.
+    
+    #Level4
+    required = 필수 값 입니다.
+    min= {0} 이상이어야 합니다.
+    range= {0} ~ {1} 범위를 허용합니다.
+    max= {0} 까지 허용합니다.
+    ```
+    
+    - 검증 오류 메시지가 발생하면 생성된 메시지 코드를 기반으로 순서대로 `MessageSource`에서 메시지에서 찾는다.
+    - 구체적인 것에서 덜 구체적인 순서대로 찾는다. 메시지에 1번이 없으면 2번을 찾고, 2번이 없으면 3번을 찾는다.
+    - 이렇게 되면 만약에 크게 중요하지 않은 오류 메시지는 기존에 정의된 것을 그냥 **재활용** 하면 된다!
+    - 실행: Level1 주석 → Level2,3 주석 → Level4 주석 (못 찾으면 코드에 작성한 디폴트 메시지를 사용한다.)
+        - Object 오류도 Level1, Level2로 재활용 가능하다.
+
+- ValidatiionUtils : Empty, 공백 같은 단순한 기능 제공
+    
+    ```java
+    ValidationUtils.rejectIfEmptyOrWhitespace(bindingResult, "itemName", "required");
+    ```
+    
+    ```java
+    if (!StringUtils.hasText(item.getItemName())) {
+        // field, required
+        bindingResult.rejectValue("itemName", "required");
+    }
+    ```
+    
+    - 위 두 코드는 똑같은 코드다.
+
+### 오류 코드와 메시지 처리 6
+
+- 검증 오류 코드는 다음과 같이 2가지로 나눌 수 있다.
+    - 개발자가 직접 설정한 오류 코드 `rejectValue()`를 직접 호출
+    - 스프링이 직접 검증 오류에 추가한 경우 (주로 타입 정보가 맞지 않음)
+
+- 스프링이 직접 만든 오류 메시지 처리
+    - 스프링은 타입 오류가 발생하면 `typeMismatch` 라는 오류 코드를 사용한다.
+    - 실행
+        - `errors.properties`에 메시지 코드 X → 스프링이 생성한 기본 메시지가 출력된다.
+        - `error.properties`에 메시지 코드 O → 해당 메시지가 출력된다.
+    - 소스코드를 하나도 건들지 않고, 원하는 메시지를 단계별로 설정할 수 있다!
+
+### Validator 분리 1
+
+- 복잡한 검증 로직을 별도로 분리하자.
+    - 컨트롤러에서 검증 로직이 차지하는 부분은 매우 크다.
+    - 이런 경우 별도의 클래스로 역할을 분리하는 것이 좋다.
+    - 그리고 이렇게 분리한 검증 로직을 재사용 할 수도 있다.
+
+- Validator 인터페이스
+    
+    ```java
+    public interface Validator {
+         boolean supports(Class<?> clazz);
+         void validate(Object target, Errors errors);
+    }
+    ```
+    
+    - `supports() {}` : 해당 검증기를 지원하는 여부 확인
+    - `validate(Object target, Errors errors)` : 검증 대상 객체와 `BindingResult`
+
+### Validator 분리 2
+
+- 스프링이 `Validator` 인터페이스를 별도로 제공하는 이유는 체계적으로 검증 기능을 도입하기 위해서다.
+    - 검증기를 직접 불러서 사용해도 된다.
+    - 그런데 `Validator` 인터페이스를 사용해서 검증기를 만들면 스프링의 추가적인 도움을 받을 수 있다.
+
+- `WebDataBinder` : 스프링의 파라미터 바인딩 역할 + 검증 기능
+    - 검증기 추가
+        
+        ```java
+        @InitBinder
+        public void init(WebDataBinder dataBinder) {
+            dataBinder.addValidators(itemValidator);
+        }
+        ```
+        
+        - 해당 컨트롤러에서 검증기를 자동으로 적용할 수 있다.
+        - `@InitBinder` → 해당 컨트롤러에만 영향을 준다.
+
+- `@Validated` : 검증기를 실행하라는 애노테이션 (스프링 검증 애노테이션)
+    - 검증 대상 앞에 붙인다.
+    - 이 애노테이션이 붙으면 `WebDataBinder`에 등록한 검증기를 찾아서 실행한다.
+    - 그런데 여러 검증기를 등록한다면 그 중에 어떤 검증기가 실행되어야 할지 구분이 필요하다. 이때 `supports()` 가 사용된다.
+
+- `@Valid` : 검증기를 실행하라는 애노테이션 (자바 표준 검증 애노테이션)
+    - build.gradle 의존관계 추가가 필요하다.
+        
+        `implementation 'org.springframework.boot:spring-boot-starter-validation'`
+        
+
+- 글로벌 설정 - 모든 컨트롤러에 다 적용
+    
+    ```java
+    package hello.itemservice;
+    
+    import hello.itemservice.web.validation.ItemValidator;
+    import org.springframework.boot.SpringApplication;
+    import org.springframework.boot.autoconfigure.SpringBootApplication;
+    import org.springframework.validation.Validator;
+    import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+    
+    @SpringBootApplication
+    public class ItemServiceApplication implements WebMvcConfigurer {
+    
+    	public static void main(String[] args) {
+    		SpringApplication.run(ItemServiceApplication.class, args);
+    	}
+    
+    	@Override
+    	public Validator getValidator() {
+    		return new ItemValidator();
+    	}
+    
+    }
+    ```
+    
+    - 글로벌 설정을 하면 BeanValidator가 자동 등록되지 않는다.
