@@ -1,6 +1,5 @@
 package hello.itemservice.validation;
 
-import hello.itemservice.domain.item.Item;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
@@ -29,6 +28,6 @@ public class BeanValidationTest {
             System.out.println("violation = " + violation);
             System.out.println("violation.getMessage = " + violation.getMessage());
         }
-        
+
     }
 }
