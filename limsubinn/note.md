@@ -1573,3 +1573,146 @@
     ```
     
     - 글로벌 설정을 하면 BeanValidator가 자동 등록되지 않는다.
+ 
+# 5. 검증2 - Bean Validation
+
+### 소개
+
+- Bean Validation
+    - 검증 로직을 모든 프로젝트에 적용할 수 있게 공통화하고 표준화 한 것
+    - 애노테이션 하나로 검증 로직을 매우 편리하게 적용할 수 있다.
+
+### Bean Validation - 시작
+
+- 순수한 Bean Validation
+    - 의존관계 추가
+        
+        `implementation 'org.springframework.boot:spring-boot-starter-validation'`
+        
+    - 검증 애노테이션
+        - `@NotBlank` : 빈값 + 공백만 있는 경우 허용 X
+        - `@NotNull` : null 허용 X
+        - `@Range(min = 1000, max = 1000000)` : 범위 안의 값이어야 한다.
+        - `@Max(9999)` : 최대 9999까지만 허용한다.
+
+### Bean Validation - 스프링 적용
+
+- 스프링 부트가 `spring-boot-starter-validation` 라이브러리를 넣으면 자동으로 Bean Validator를 인지하고 스프링에 통합한다.
+    - `LocalValidatorFactoryBean`을 글로벌 Validator로 등록한다.
+    - 이 Validator는 `@NotNull` 같은 애노테이션을 보고 검증을 수행한다.
+    - 이렇게 글로벌 Validator가 적용되어 있기 때문에, `@Valid`, `@Validated`만 적용하면 된다.
+    - 검증 오류가 발생하면 `FieldError`, `ObjectError`를 생성해서 `BindingResult`에 담아준다.
+
+- 검증 순서
+    - `@ModelAttribute` 각각의 필드에 타입 변환 시도
+        - 성공하면 다음으로
+        - 실패하면 `typeMismatch`로 `FieldError` 추가
+    - Validator 적용
+
+### Bean Validation - 에러 코드
+
+- Bean Validation을 적용하고 bindingResult 에 등록된 검증 오류 코드를 보자.
+    - 오류 코드가 애노테이션 이름으로 등록된다. 마치 `typeMismatch`와 유사하다.
+
+- 오류 코드를 기반으로 MessageCodesResolver를 통해 다양한 메시지 코드가 순서대로 생성된다.
+    - @NotBlank
+        - NotBlank.item.itemName
+        - NotBlank.itemName
+        - NotBlank.java.lang.String
+        - NotBlank
+
+- BeanValidation 메시지 찾는 순서
+    - 생성된 메시지 코드 순서대로 messageSource 에서 메시지 찾기
+    - 애노테이션의 message 속성 사용 
+    `@NotBlank(message = "공백! {0}")`
+    - 라이브러리가 제공하는 기본 값 사용 → 공백일 수 없습니다.
+
+### Bean Validation - 오브젝트 오류
+
+- `@ScriptAssert()`
+    - 특정 필드(`FieldError`)가 아닌 해당 오브젝트 관련 오류(`ObjectError`) 처리
+        
+        ```java
+        @Data
+        @ScriptAssert(lang = "javascript", script = "_this.price * _this.quantity >= 10000", message = "총합이 10000원 넘게 입력해주세요.")
+        public class Item {
+        		...
+        }
+        ```
+        
+    - 메시지 코드
+        - ScriptAssert.item
+        - ScriptAssert
+    - `@ScriptAssert()`를 쓰는 것보다는 오브젝트 오류 관련 부분만 직접 자바 코드로 작성하는 것을 권장
+
+### Bean Validation - 한계
+
+- 데이터를 등록할 때와 수정할 때 요구사항이 다를 수 있다.
+    - 등록 시 기존 요구사항
+        - 타입 검증
+            - 가격, 수량에 문자 X
+        - 필드 검증
+            - 상품명: 필수, 공백 X
+            - 가격: 1000 ~ 1000000
+            - 수량: 최대 9999
+        - 특정 필드의 범위를 넘어서는 검증
+            - 가격 * 수량 ≥ 10000
+    - 수정 시 요구사항
+        - 등록 시에는 수량을 최대 9999까지 등록할 수 있지만 수정 시에는 수량을 무제한으로 변경할 수 있다.
+        - 등록 시에는 id에 값이 없어도 되지만 수정 시에는 id 값이 필수이다.
+
+- 수정 요구사항 적용
+    - id : @NotNull 추가
+    - quantity : @Max(9999) 제거
+
+- 실행 시 수정은 잘 동작하지만 등록에서 문제가 발생한다.
+    - `item` 은 등록과 수정에서 검증 조건의 충돌이 발생하고, 등록과 수정은 같은 BeanValidation을 적용할 수 없다.
+
+### Bean Validation - groups
+
+- 동일한 모델 객체를 등록할 때와 수정할 때 각각 다르게 검증하는 방법
+    - BeanValidation의 groups 기능 사용
+    - Item을 직접 사용하지 않고 ItemSaveForm, ItemUpdateForm 같은 폼 전송을 위한 별도의 모델 객체를 만들어서 사용
+
+- groups
+    - SaveCheck(저장용), UpdateCheck(수정용) 인터페이스 생성
+    - `@NotNull(groups = UpdateCheck.class)`
+    `@NotBlank(groups = {SaveCheck.class, UpdateCheck.class})`
+    - `@Validated(SaveCheck.class) @ModelAttribute Item item`
+    `@Validated(UpdateCheck.class) @ModelAttribute Item item`
+
+** groups를 적용하려면 `@Validated`를 써야 한다. (`@Valid` 지원 X)
+
+** 실무에서는 주로 groups 기능을 실제 잘 사용하지 않고, 등록용 폼 객체와 수정용 폼 객체를 분리해서 사용한다.
+
+### Form 전송 객체 분리
+
+- 폼 데이터 전달에 Item 도메인 객체 사용
+    - `HTML Form -> Item -> Controller -> Item -> Repository`
+        - 장점: Item 도메인 객체를 컨트롤러, 리포지토리 까지 직접 전달해서 중간에 Item을 만드는 과정이 없어서 간단하다.
+        - 단점: 간단한 경우에만 적용할 수 있다. 수정시 검증이 중복될 수 있고, groups를 사용해야 한다.
+
+- 폼 데이터 전달을 위한 별도의 객체 사용
+    - `HTML Form -> ItemSaveForm -> Controller -> Item 생성 -> Repository`
+        - 장점: 전송하는 폼 데이터가 복잡해도 거기에 맞춘 별도의 폼 객체를 사용해서 데이터를 전달 받을 수 있다. 보통 등록과 수정용으로 별도의 폼 객체를 만들기 때문에 검증이 중복되지 않는다.
+        - 단점: 폼 데이터를 기반으로 컨트롤러에서 Item 객체를 생성하는 변환 과정이 추가된다.
+
+### Bean Validation - HTTP 메시지 컨버터
+
+- `@Valid`, `@Validated`는 HttpMessageConverter(`@RequestBody`)에도 적용할 수 있다.
+    - 성공
+        
+        ![image](https://github.com/Springdingdongrami/spring-mvc-2/assets/66028419/1f38097d-0f77-4b2a-af41-b5918902c0ee)
+
+    - 실패 (타입 오류) → JSON 객체 생성 실패로 컨트롤러 자체가 호출이 안 된다.
+        
+        ![image](https://github.com/Springdingdongrami/spring-mvc-2/assets/66028419/9e5bf33d-101f-481b-aefd-ee14bc05ac17)
+
+    - 실패 (값 오류) → 검증 오류
+        
+        ![image](https://github.com/Springdingdongrami/spring-mvc-2/assets/66028419/708d8c71-d82d-4397-b86d-84ec13090ddc)
+
+
+- @ModelAttribute vs @RequestBody
+    - `@ModelAttribute`는 필드 단위로 정교하게 바인딩이 적용된다. 특정 필드가 바인딩 되지 않아도 나머지 필드는 정상 바인딩 되고, Validator를 사용한 검증도 적용할 수 있다.
+    - `@RequestBody`는 HttpMessageConverter 단계에서 JSON 데이터를 객체로 변경하지 못하면 이후 단계 자체가 진행되지 않고 예외가 발생한다. 컨트롤러도 호출되지 않고, Validator도 적용할 수 없다.
