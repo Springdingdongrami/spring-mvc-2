@@ -1716,3 +1716,212 @@
 - @ModelAttribute vs @RequestBody
     - `@ModelAttribute`는 필드 단위로 정교하게 바인딩이 적용된다. 특정 필드가 바인딩 되지 않아도 나머지 필드는 정상 바인딩 되고, Validator를 사용한 검증도 적용할 수 있다.
     - `@RequestBody`는 HttpMessageConverter 단계에서 JSON 데이터를 객체로 변경하지 못하면 이후 단계 자체가 진행되지 않고 예외가 발생한다. 컨트롤러도 호출되지 않고, Validator도 적용할 수 없다.
+ 
+# 6. 로그인 처리1 - 쿠키, 세션
+
+### 로그인 요구사항
+
+- 홈 화면 - 로그인 전
+    - 회원가입
+    - 로그인
+- 홈 화면 - 로그인 후
+    - 본인 이름 (~님 환영합니다.)
+    - 상품 관리
+    - 로그아웃
+- 보안 요구사항
+    - 로그인 사용자만 상품에 접근 및 관리 가능
+    - 로그인 하지 않은 사용자가 상품 관리에 접근하면 로그인 화면으로 이동
+
+### 회원가입
+
+- 회원 관련 기능
+    - save
+    - findById
+    - findByLoginId
+    - findAll
+    - clearStore (테스트용)
+
+### 로그인 기능
+
+- 로그인에 성공하면 홈 화면으로 이동하고, 로그인에 실패하면 글로벌 오류 발생 후 정보를 다시 입력
+
+### 로그인 처리하기 - 쿠키 사용
+
+- 로그인 상태 유지 → 쿠키
+    - 서버에서 로그인에 성공하면 HTTP 응답에 쿠키를 담아서 브라우저에 전달하자. 그러면 브라우저는 앞으로 해당 쿠키를 지속해서 보내준다.
+    - 쿠키에는 영속 쿠키와 세션 쿠키가 있다.
+        - 영속 쿠키: 만료 날짜를 입력하면 해당 날짜까지 유지
+        - 세션 쿠키: 만료 날짜를 생략하면 브라우저 종료시 까지만 유지
+
+- 로그인 성공 처리
+    
+    ```java
+    @Slf4j
+    @Controller
+    @RequiredArgsConstructor
+    public class LoginController {
+    
+        ...
+    
+        @PostMapping("/login")
+        public String login(@Valid @ModelAttribute LoginForm form,
+                            BindingResult bindingResult,
+                            HttpServletResponse response) {
+            ...
+    
+            // 로그인 성공 처리
+            Cookie idCookie = new Cookie("memberId", String.valueOf(loginMember.getId()));
+            response.addCookie(idCookie); // 쿠키에 시간 정보를 주지 않으면 세션 쿠키 (브라우저 종료시 모두 종료)
+            return "redirect:/";
+        }
+    }
+    ```
+    
+    ![image](https://github.com/Springdingdongrami/spring-mvc-2/assets/66028419/3216b771-1c5f-49a4-846e-187c49ccb922)
+    
+    - 이후 페이지를 새로고침 해도 Request Header에 `Cookie: memberId=1` 이 들어있다.
+
+- 로그아웃
+    
+    ```java
+    @PostMapping("/logout")
+    public String logout(HttpServletResponse response) {
+        expireCookie(response, "memberId");
+        return "redirect:/";
+    }
+    
+    private void expireCookie(HttpServletResponse response, String cookieName) {
+        Cookie cookie = new Cookie(cookieName, null);
+        cookie.setMaxAge(0);
+        response.addCookie(cookie);
+    }
+    ```
+    
+    - 서버에서 해당 쿠키의 종료 날짜를 0으로 지정한다.
+
+### 쿠키와 보안 문제
+
+- 보안 문제
+    - 쿠키 값은 임의로 변경할 수 있다.
+    - 쿠키에 보관된 정보는 훔쳐갈 수 있다.
+    - 해커가 쿠키를 한 번 훔쳐가면 평생 사용할 수 있다.
+
+- 대안
+    - 쿠키에 중요한 값을 노출하지 않고, 사용자 별로 예측 불가능한 임의의 토큰(랜덤 값)을 노출하고, 서버에서 토큰과 사용자 id를 매핑해서 인식한다. 그리고 서버에서 토큰을 관리한다.
+    - 해커가 토큰을 털어가도 시간이 지나면 사용할 수 없도록 서버에서 해당 토큰의 만료시간을 짧게 유지한다. 또는 해킹이 의심되는 경우 서버에서 해당 토큰을 강제로 제거하면 된다.
+
+### 로그인 처리하기 - 세션 동작 방식
+
+- 쿠키 문제를 해결하려면 중요한 정보를 모두 서버에 저장해야 한다. 그리고 클라이언트와 서버는 추정 불가능한 임의의 식별자 값으로 연결해야 한다. ⇒ 세션!
+
+- 세션 동작 방식
+    - 사용자가 아이디, 비밀번호를 전달하면 서버에서 해당 사용자가 맞는지 확인한다.
+    - 서버에서는 세션ID를 생성하는데, 추정 불가능해야 한다.
+        - UUID는 추정이 불가능하다. 
+        `Cookie: mySessionId=zz0101xx-bab9-4b92-9b32-dadb280f4b61`
+        - 생성된 세션ID와 세션에 보관할 값(회원 정보)을 서버의 세션 저장소에 보관한다.
+    - 클라이언트와 서버는 결국 쿠키로 연결이 되어야 한다.
+        - 서버는 클라이언트에 세션ID만 쿠키에 담아서 전달한다.
+        - 클라이언트는 쿠키 저장소에 해당 쿠키를 보관한다.
+
+- 로그인 이후 접근
+    - 클라이언트는 요청 시 항상 mySessionId 쿠키를 전달한다.
+    - 서버에서는 클라이언트가 전달한 쿠키 정보로 세션 저장소를 조회해서 로그인 시 보관한 세션 정보를 사용한다.
+
+### 로그인 처리하기 - 세션 직접 만들기
+
+- 세션 관리
+    - 생성
+        - seesionId 생성 (임의의 추정 불가능한 랜덤 값)
+        - 세션 저장소에 sessionId와 보관할 값 저장
+        - sessionId로 응답 쿠키를 생성해서 클라이언트에 전달
+    - 조회
+        - 클라이언트가 요청한 sessionid 쿠키의 값으로 세션 저장소에 보관한 값 조회
+    - 만료
+        - 클라이언트가 요청한 sessionId 쿠키의 값으로 세션 저장소에 보관한 sessionid와 값 제거
+
+### 로그인 처리하기 - 서블릿 HTTP 세션 1
+
+- HttpSession
+    - 서블릿이 제공하는 세션 기능
+    - 서블릿을 통해 HttpSession을 생성하면 쿠키를 생성한다.
+        - 이름: `JSESSIONID`
+        - 값: 추정 불가능한 랜덤 값
+    - create 옵션
+        - `request.getSession(true)` (기본값)
+            - 세션이 있으면 기존 세션 반환
+            - 없으면 새로운 세션을 생성해서 반환
+        - `request.getSession(false)`
+            - 세션이 있으면 기존 세션 반환
+            - 없으면 새로운 세션을 생성하지 않고 null을 반환
+
+### 로그인 처리하기 - 서블릿 HTTP 세션 2
+
+- `@SessionAttribute`
+    - 이미 로그인 된 사용자를 찾을 때 다음과 같이 사용하면 된다.
+        
+        ```java
+        @SessionAttribute(name = "loginMember", required = false) Member loginMember
+        ```
+        
+    - 이 기능은 세션을 생성하지 않는다.
+    - 세션을 찾고, 세션에 들어있는 데이터를 찾는 번거로운 과정을 스프링이 한번에 편리하게 처리해준다.
+
+- TrackingModes
+    - 로그인을 처음 시도하면 URL이 `jsessionid` 를 포함하고 있는 것을 확인할 수 있다.
+        
+        ```
+        http://localhost:8080/;jsessionid=F59911518B921DF62D09F0DF8F83F872
+        ```
+        
+    - 이것은 웹 브라우저가 쿠키를 지원하지 않을 때 쿠키 대신 URL을 통해서 세션을 유지하는 방법이다. 이 방법을 사용하려면 URL에 이 값을 계속 포함해서 전달해야 한다.
+    - URL 전달 방식을 끄고 항상 쿠키를 통해서만 세션을 유지하고 싶으면 `application.properties` 파일에 `tracking-modes` 옵션을 넣어주면 된다. 이렇게 하면 URL에 `jsessionid` 가 노출되지 않는다.
+        
+        ```
+        server.servlet.session.tracking-modes=cookie
+        ```
+        
+
+** URL에 jsessionid가 꼭 필요하다면 `application.properties`에 다음 옵션을 추가
+
+```
+spring.mvc.pathmatch.matching-strategy=ant_path_matcher
+```
+
+### 세션 정보와 타임아웃 설정
+
+- 세션 정보 확인
+    - `sessionId` : 세션Id, `JSESSIONID`의 값
+    - `maxInactiveInterval` : 세션의 유효 시간 예) 1800초(30분)
+    - `creationTime` : 세션 생성일시
+    - `lastAccessedTime` : 세션과 연결된 사용자가 최근에 서버에 접근한 시간, 클라이언트에서 서버로 `sessionId`(`JSESSIONID`)를 요청한 경우에 갱신된다.
+    - `isNew` : 새로 생성된 세션인지, 아니면 이미 과거에 만들어졌고, 클라이언트에서 서버로 `sessionId`(`JSESSIONID`)를 요청해서 조회된 세션인지 여부
+
+- 세션 타임아웃 설정
+    - 세션은 사용자가 로그아웃을 직접 호출해서 `session.invalidate()`가 호출 되는 경우에 삭제된다. 그런데 대부분의 사용자는 로그아웃을 선택하지 않고, 그냥 웹 브라우저를 종료한다.
+    - 문제는 HTTP가 비 연결성(ConnectionLess)이므로 서버 입장에서는 해당 사용자가 웹 브라우저를 종료한 것인지 아닌지를 인식할 수 없다. 따라서 서버에서 세션 데이터를 언제 삭제해야 하는지 판단하기가 어렵다.
+    - 남아있는 세션을 무한정 보관하면 다음과 같은 문제가 발생할 수 있다.
+        - 세션과 관련된 쿠키(`JSESSIONID`)를 탈취 당했을 경우 오랜 시간이 지나도 해당 쿠키로 악의적인 요청을 할 수 있다.
+        - 세션은 기본적으로 메모리에 생성된다. 메모리의 크기가 무한하지 않기 때문에 꼭 필요한 경우만 생성해서 사용해야 한다.
+
+- 세션의 종료 시점
+    - **세션 생성 시점으로부터 30분** → 30분이 지나면 세션이 삭제되기 때문에, 열심히 사이트를 돌아다니다가 또 로그인을 해서 세션을 생성해야 한다. 따라서 30분 마다 계속 로그인해야 하는 번거로움이 발생한다.
+    - **사용자가 서버에 최근에 요청한 시간을 기준으로 30분** → 사용자가 서비스를 사용하고 있으면, 세션의 생존 시간이 30분으로 계속 늘어나게 된다. 따라서 30분 마다 로그인해야 하는 번거로움이 사라진다. `HttpSession` 은 이 방식을 사용한다.
+
+- 세션 타임아웃 설정
+    - 스프링 부트로 글로벌 설정 → application.properties
+        
+        ```
+        server.servlet.session.timeout=60
+        ```
+        
+        - 기본 값: 1800 (30분)
+        - 글로벌 설정은 분 단위로 설정해야 한다.
+    - 특정 세션 단위로 시간 설정
+        
+        ```java
+        session.setMaxInactiveInterval(1800);
+        ```
+        
+
+** 세션에는 최소한의 데이터만 보관하자.
