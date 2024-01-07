@@ -2145,3 +2145,266 @@ spring.mvc.pathmatch.matching-strategy=ant_path_matcher
         
         }
         ```
+
+# 8. 예외 처리와 오류 페이지
+
+### 프로젝트 생성
+
+- Gradle Project
+- Packaging: Jar
+- Dependencies: Spring Web, Lombok, Thymeleaf, Validation
+
+### 서블릿 예외 처리 - 시작
+
+- 서블릿은 2가지 방식으로 예외 처리를 지원한다.
+    - Exception
+    - response.sendError(HTTP 상태 코드, 오류 메시지)
+
+- Exception
+    - 자바 직접 실행
+        - 자바의 메인 메서드를 직접 실행하는 경우 main이라는 이름의 스레드가 실행된다.
+        - 실행 도중에 예외를 잡지 못하고 처음 실행한 main() 메서드를 넘어서 예외가 던져지면, 예외 정보를 남기고 해당 스레드는 종료된다.
+    - 웹 애플리케이션
+        - 웹 애플리케이션은 사용자 요청 별로 별도의 스레드가 할당되고, 서블릿 컨테이너 안에서 실행된다.
+        - 애플리케이션에서 예외가 발생했는데 try ~ catch 로 예외를 잡아서 처리하면 문제가 없다.
+        - 그런데 애플리케이션에서 예외를 잡지 못하고, 서블릿 밖으로 까지 예외가 전달되면 WAS까지 예외가 전달된다.
+            
+            ```
+            WAS <- 필터 <- 서블릿 <- 인터셉터 <- 컨트롤러(예외 발생)
+            ```
+            
+    - `Exception`의 경우 서버 내부에서 처리할 수 없는 오류가 발생한 것으로 생각해서 HTTP 상태 코드 500을 반환한다.
+    - 아무사이트나 호출해보면 톰캣이 기본으로 제공하는 404 오류 화면을 볼 수 있다.
+
+- response.sendError(HTTP 상태 코드, 오류 메시지)
+    - 이것을 호출한다고 당장 예외가 발생하는 것은 아니지만, 서블릿 컨테이너에게 오류가 발생했다는 점을 전달할 수 있다.
+    - 이 메서드를 사용하면 HTTP 상태 코드와 오류 메시지도 추가할 수 있다.
+        
+        ```java
+        response.sendError(HTTP 상태 코드);
+        response.sendError(HTTP 상태 코드, 오류 메시지);
+        ```
+        
+    - 흐름
+        
+        ```
+        WAS(sendError 호출 기록 확인) <- 필터 <- 서블릿 <- 인터셉터 <- 컨트롤러 (response.sendError())
+        ```
+        
+        - `response.sendError()`를 호출하면 `response` 내부에는 오류가 발생했다는 상태를 저장해둔다.
+        - 그리고 서블릿 컨테이너는 고객에게 응답 전에 `response` 에 `sendError()`가 호출되었는지 확인한다.
+        - 호출 되었다면 설정한 오류 코드에 맞추어 기본 오류 페이지를 보여준다.
+
+### 서블릿 예외 처리 - 오류 화면 제공
+
+- 서블릿은 `Exception`이 발생해서 서블릿 밖으로 전달되거나 `response.sendError()`가 호출 되었을 때, 각각의 상황에 맞춘 오류 처리 기능을 제공한다.
+    - 서블릿 오류 페이지 등록
+        
+        ```java
+        package hello.exception;
+        
+        import org.springframework.boot.web.server.ConfigurableWebServerFactory;
+        import org.springframework.boot.web.server.ErrorPage;
+        import org.springframework.boot.web.server.WebServerFactoryCustomizer;
+        import org.springframework.http.HttpStatus;
+        import org.springframework.stereotype.Component;
+        
+        @Component
+        public class WebServerCustomizer implements WebServerFactoryCustomizer<ConfigurableWebServerFactory> {
+        
+            @Override
+            public void customize(ConfigurableWebServerFactory factory) {
+                // HTTP 상태 코드
+                ErrorPage errorPage404 = new ErrorPage(HttpStatus.NOT_FOUND, "/error-page/404");
+                ErrorPage errorPage500 = new ErrorPage(HttpStatus.INTERNAL_SERVER_ERROR, "/error-page/500");
+                // Exception
+                ErrorPage errorPageEx = new ErrorPage(RuntimeException.class, "/error-page/500");
+        
+                factory.addErrorPages(errorPage404, errorPage500, errorPageEx);
+            }
+        
+        }
+        ```
+        
+    - 해당 오류를 처리할 컨트롤러가 필요하다.
+        
+        ```java
+        package hello.exception.servlet;
+        
+        import jakarta.servlet.http.HttpServletRequest;
+        import jakarta.servlet.http.HttpServletResponse;
+        import lombok.extern.slf4j.Slf4j;
+        import org.springframework.stereotype.Controller;
+        import org.springframework.web.bind.annotation.RequestMapping;
+        
+        @Slf4j
+        @Controller
+        public class ErrorPageController {
+        
+            @RequestMapping("/error-page/404")
+            public String errorPage404(HttpServletRequest request, HttpServletResponse response) {
+                log.info("errorPage 404");
+                return "error-page/404";
+            }
+        
+            @RequestMapping("/error-page/500")
+            public String errorPage500(HttpServletRequest request, HttpServletResponse response) {
+                log.info("errorPage 500");
+                return "error-page/500";
+            }
+        
+        }
+        ```
+        
+    - 오류를 처리할 View 만들어주기
+    - 실행 결과
+        
+        ![image](https://github.com/Springdingdongrami/spring-mvc-2/assets/66028419/83a1babd-19f7-409a-9656-9212069047e4)
+
+        
+
+### 서블릿 예외 처리 - 오류 페이지 작동 원리
+
+- 서블릿은 `Exception`이 발생해서 서블릿 밖으로 전달되거나 `response.sendError()`가 호출 되었을 때, 설정한 오류 페이지를 찾는다.
+    - WAS는 해당 예외를 처리하는 오류 페이지 경로를 찾아 내부에서 오류 페이지를 다시 요청한다. 이때 오류 페이지 경로로 필터, 서블릿, 인터셉터, 컨트롤러가 다시 호출된다.
+        - 예외 발생 흐름
+            
+            ```
+            WAS <- 필터 <- 서블릿 <- 인터셉터 <- 컨트롤러 (response.sendError())
+            ```
+            
+        - 오류 페이지 요청 흐름
+            
+            ```
+            WAS "/error-page/500" 다시 요청 -> 필터 -> 서블릿 -> 인터셉터 -> 컨트롤러(/error-page/500) -> View
+            ```
+            
+    - 웹 브라우저(클라이언트)는 서버 내부에서 이런 일이 일어나는지 전혀 모른다. 오직 서버 내부에서 오류 페이지를 찾기 위해 추가적인 호출을 한다.
+- 오류 정보 추가
+    - WAS는 오류 페이지를 단순히 요청만 하는 것이 아니라, 오류 정보를 `request`의 `attribute`에 추가해서 넘겨준다.
+
+### 서블릿 예외 처리 - 필터
+
+- DispatcherType
+    - 오류가 발생하면 오류 페이지를 출력하기 위해 WAS 내부에서 다시 한번 호출이 발생한다. 이때 필터, 서블릿, 인터셉터도 모두 다시 호출되는데 로그인 인증 체크 같은 경우를 생각해보면 이미 한번 필터나 인터셉터에서 로그인 체크를 완료했다. 따라서 서버 내부에서 오류 페이지를 호출한다고 해서 해당 필터나 인터셉터가 한번 더 호출되는 것은 매우 비효율적이다.
+    - 클라이언트로부터 발생한 정상 요청인지, 아니면 오류 페이지를 출력하기 위한 내부 요청인지 구분하기 위해 서블릿은 `DispatcherType`이라는 추가 정보를 제공한다.
+    - `jakarta.servlet.DispatcherType`
+        
+        ```java
+        public enum DispatcherType {
+             FORWARD, // 서블릿에서 다른 서블릿이나 JSP를 호출할 때
+             INCLUDE, // 서블릿에서 다른 서블릿이나 JSP의 결과를 포함할 때
+             REQUEST, // 클라이언트 요청 
+             ASYNC, // 서블릿 비동기 호출
+             ERROR // 오류 요청 
+        }
+        ```
+        
+
+- 필터와 DispatcherType
+    - WebConfig
+        
+        ```java
+        // 두 가지를 모두 넣으면 클라이언트 요청은 물론이고, 오류 페이지 요청에서도 필터가 호출된다.
+        filterRegistrationBean.setDispatcherTypes(DispatcherType.REQUEST, DispatcherType.ERROR);
+        
+        // 기본값 (클라이언트의 요청이 있는 경우에만 필터가 적용)
+        filterRegistrationBean.setDispatcherTypes(DispatcherType.REQUEST);
+        
+        // 오류 페이지 요청 전용 필터를 적용하고 싶으면
+        filterRegistrationBean.setDispatcherTypes(DispatcherType.ERROR);
+        ```
+        
+        - 필터를 등록할 때 어떤 `DispatcherType`인 경우에 필터를 적용할 지 선택
+
+### 서블릿 예외 처리 - 인터셉터
+
+- 인터셉터는 서블릿이 제공하는 기능이 아니라 스프링이 제공하는 기능이기 때문에 `DispatcherType`과 무관하게 항상 호출된다.
+    - 인터셉터는 요청 경로에 따라서 추가하거나 제외하기 쉽게 되어 있기 때문에, 이러한 설정을 사용해서 오류 페이지 경로를 `excludePathPatterns` 를 사용해서 빼주면 된다.
+
+- 전체 흐름 정리
+    - `/hello` 정상 요청
+        
+        ```
+        WAS(/hello, dispatchType=REQUEST) -> 필터 -> 서블릿 -> 인터셉터 -> 컨트롤러 -> View
+        ```
+        
+    - `/error-ex` 오류 요청
+        
+        ```
+        1. WAS(/error-ex, dispatchType=REQUEST) -> 필터 -> 서블릿 -> 인터셉터 -> 컨트롤러
+        2. WAS(여기까지 전파) <- 필터 <- 서블릿 <- 인터셉터 <- 컨트롤러(예외발생)
+        3. WAS 오류 페이지 확인
+        4. WAS(/error-page/500, dispatchType=ERROR) -> 필터(x) -> 서블릿 -> 인터셉터(x) -> 컨트롤러(/error-page/500) -> View
+        ```
+        
+        - 필터는 DispatcherType으로 중복 호출 제거
+        `dispatchType=REQUEST`
+        - 인터셉터는 경로 정보로 중복 호출 제거
+        `excludePathPatterns("/error-page/**")`
+
+### 스프링 부트 - 오류 페이지 1
+
+- 지금까지 예외 처리 페이지를 만들기 위해 다음과 같은 과정을 거쳤다.
+    - `WebServerCustomizer` 만들기
+    - 예외 종류에 따라 `ErrorPage` 추가
+        - 예외 처리용 컨트롤러 `ErrorPageController` 만들기
+
+- 스프링 부트는 이런 과정을 모두 기본으로 제공한다.
+    - `ErrorPage`를 자동으로 등록한다.
+        - `/error`라는 경로로 기본 오류 페이지를 설정
+        - `new ErrorPage("/error")`, 상태 코드와 예외를 설정하지 않으면 기본 오류 페이지로 사용된다.
+        - 서블릿 밖으로 예외가 발생하거나 `response.sendError()`가 호출되면 모든 오류는 `/error`를 호출하게 된다.
+    - `BasicErrorController`라는 스프링 컨트롤러를 자동으로 등록한다.
+        - `ErrorPage`에서 등록한 `/error`를 매핑해서 처리하는 컨트롤러다.
+
+** `ErrorMvcAutoConfiguration` 클래스가 오류 페이지를 자동으로 등록하는 역할을 한다.
+
+- 개발자는 오류 페이지 화면만 `BasicErrorController`가 제공하는 룰과 우선순위에 따라 등록하면 된다.
+    - 뷰 선택 우선 순위 (뷰 템플릿 > 정적 리소스, 구체적인 것 > 덜 구체적인 것)
+        1. 뷰 템플릿
+            - `resources/templates/error/500.html`
+            - `resources/templates/error/5xx.html`
+        2. 정적 리소스 (`static`, `public`)
+            - `resources/static/error/400.html`
+            - `resources/static/error/4xx.html`
+        3. 적용 대상이 없을 때 뷰 이름 (`error`)
+            - `resources/templates/error.html`
+
+### 스프링 부트 - 오류 페이지 2
+
+- BasicController가 제공하는 기본 정보들 - model에 담아서 뷰에 전달한다.
+    
+    ```
+    * timestamp: Fri Feb 05 00:00:00 KST 2021
+    * status: 400
+    * error: Bad Request
+    * exception: org.springframework.validation.BindException 
+    * trace: 예외 trace
+    * message: Validation failed for object='data'. Error count: 1
+    * errors: Errors(BindingResult)
+    * path: 클라이언트 요청 경로 ("/hello")
+    ```
+    
+- 오류 관련 내부 정보들을 고객에게 노출하는 것은 좋지 않다. 그래서 `BasicErrorController` 오류 컨트롤러에서 다음 오류 정보를 `model` 에 포함할지 여부 선택할 수 있다. (`application.properties`)
+    
+    ```
+    # exception 포함 여부 (true, false)
+    server.error.include-exception=false
+    
+    # message 포함 여부 (never, always, on_param)
+    server.error.include-message=never
+    
+    # trace 포함 여부 (never, always, on_param)
+    server.error.include-stacktrace=never
+    
+    # errors 포함 여부 (never, always, on_param)
+    server.error.include-binding-errors=never
+    ```
+    
+
+- 스프링 부트 오류 관련 옵션
+    - `server.error.whitelabel.enabled=true` : 오류 처리 화면을 못 찾을 시, 스프링 whitelabel 오류 페이지 적용
+    - `server.error.path=/error` : 오류 페이지 경로, 스프링이 자동 등록하는 서블릿 글로벌 오류 페이지 경로와 `BasicErrorController` 오류 컨트롤러 경로에 함께 사용된다.
+
+** 에러 공통 처리 컨트롤러의 기능을 변경하고 싶으면 `ErrorController` 인터페이스를 상속 받아서 구현하거나 `BasicErrorController` 상속 받아서 기능을 추가하면 된다.
