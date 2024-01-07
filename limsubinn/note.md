@@ -1925,3 +1925,223 @@ spring.mvc.pathmatch.matching-strategy=ant_path_matcher
         
 
 ** 세션에는 최소한의 데이터만 보관하자.
+
+# 7. 로그인 처리2 - 필터, 인터셉터
+
+### 서블릿 필터 - 소개
+
+- 공통 관심 사항
+    - 로그인 한 사용자만 상품 관리 페이지에 들어갈 수 있어야 한다.
+    - 그런데 문제는 로그인 하지 않은 사용자도 URL을 직접 호출하면 상품 관리 화면에 들어갈 수 있다.
+    `http://localhost:8080/items`
+    - 상품 관리 컨트롤러에서 로그인 여부를 체크하는 로직을 하나하나 작성하면 되겠지만, 모든 로직에 공통으로 로그인 여부를 확인해야 하고, 더 큰 문제는 향후 로그인과 관련된 로직이 수정되면 작성한 모든 로직을 다 수정해야 한다.
+    - 이렇게 애플리케이션 여러 로직에서 공통으로 관심이 있는 것을 **공통 관심사(cross-cutting concern)**라고 한다.
+    - 공통 관심사는 스프링의 AOP로도 해결할 수 있지만, 웹과 관련된 공통 관심사는 지금부터 설명할 **서블릿 필터** 또는 **스프링 인터셉터**를 사용하는 것이 좋다.
+
+- 서블릿 필터 (서블릿이 제공하는 기술)
+    - 흐름
+        - HTTP 요청 → WAS → 필터 → 서블릿 → 컨트롤러
+    - 제한
+        - HTTP 요청 → WAS → 필터 → 서블릿 → 컨트롤러 (로그인 사용자)
+        - HTTP 요청 → WAS → 필터 (비 로그인 사용자 - 적절하지 않은 요청이라 판단하고 서블릿을 호출하지 않는다.)
+    - 체인
+        - HTTP 요청 → WAS → 필터1 → 필터2 → 필터3 → 서블릿 → 컨트롤러
+    - 인터페이스
+        
+        ```java
+        public interface Filter {
+        
+        	public default void init(FilterConfig filterConfig) throws ServletException;
+        
+        	public void doFilter(ServletRequest request, ServletResponse response,FilterChain chain)
+        			throws IOException, ServletException;
+        
+        	public default void destroy();
+        
+        }
+        ```
+        
+        - 필터 인터페이스를 구현하고 등록하면 서블릿 컨테이너가 필터를 싱글톤 객체로 생성하고 관리한다.
+        - `init()` : 필터 초기화 메서드, 서블릿 컨테이너가 생성될 때 호출된다.
+        - `doFilter()` : 고객의 요청이 올 때마다 해당 메서드가 호출된다. 필터의 로직을 구현하면 된다.
+        - `destroy()` : 필터 종료 메서드, 서블릿 컨테이너가 종료될 때 호출된다.
+
+### 서블릿 필터 - 요청 로그
+
+- 모든 요청을 로그로 남기는 필터를 개발하고 적용해보자.
+    - `public class LogFilter implements Filter` : 필터를 사용하려면 필터 인터페이스를 구현해야 한다.
+    - `ServletRequest request`는 HTTP 요청이 아닌 경우까지 고려해서 만든 인터페이스이다. HTTP를 사용하면 `HttpServletRequest httpRequest = (HttpServletRequest) request;` 와 같이 다운 캐스팅 하면 된다.
+    - `chain.doFilter(request, response);` : 다음 필터가 있으면 필터를 호출하고, 필터가 없으면 서블릿을 호출한다. 만약 이 로직을 호출하지 않으면 다음 단계로 진행되지 않는다.
+
+- WebConfig - 필터 설정
+    - 스프링 부트를 사용한다면 `FilterRegistrationBean`을 사용해서 등록하면 된다.
+    - `setFilter(new LogFilter())` : 등록할 필터를 지정한다.
+    - `setOrder(1)` : 필터는 체인으로 동작하기 때문에 순서가 필요하다. 낮을 수록 먼저 동작한다.
+    - `addUrlPatterns("/*")` : 필터를 적용할 URL 패턴을 지정한다. 한번에 여러 패턴을 지정할 수 있다.
+
+### 서블릿 필터 - 인증 체크
+
+- 인증 필터를 적용해도 홈, 회원가입, 로그인 화면, css 같은 리소스에는 접근할 수 있어야 한다. → 화이트 리스트를 만든 후, 화이트 리스트를 제외한 모든 경우에 인증 체크 로직을 적용한다.
+
+- RedirectURL 처리
+    - 로그인에 성공하면 처음 요청한 URL로 이동하는 기능을 개발해보자.
+    - 로그인 체크 필터에서, 미인증 사용자는 요청 경로를 포함해서 `/login` 에 `redirectURL` 요청 파라미터를 추가해서 요청했다. 이 값을 사용해서 로그인 성공시 해당 경로로 고객을 `redirect` 한다.
+
+### 스프링 인터셉터 - 소개
+
+- 스프링 인터셉터 (스프링 MVC가 제공하는 기술)
+    - 흐름
+        - HTTP 요청 → WAS → 필터 → 서블릿 → 스프링 인터셉터 → 컨트롤러
+    - 제한
+        - HTTP 요청 → WAS → 필터 → 서블릿 → 스프링 인터셉터 → 컨트롤러 (로그인 사용자)
+        - HTTP 요청 → WAS → 필터 → 서블릿 → 스프링 인터셉터 (비 로그인 사용자)
+    - 체인
+        - HTTP 요청 → WAS → 필터 → 서블릿 → 인터셉터1 → 인터셉터2 → 컨트롤러
+    - 인터페이스
+        
+        ```java
+        public interface HandlerInterceptor {
+        
+        	default boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) throws Exception;
+        
+        	default void postHandle(HttpServletRequest request, HttpServletResponse response, Object handler,
+        			@Nullable ModelAndView modelAndView) throws Exception;
+        
+        	default void afterCompletion(HttpServletRequest request, HttpServletResponse response, Object handler,
+        			@Nullable Exception ex) throws Exception;
+        
+        }
+        ```
+        
+        - 스프링의 인터셉터를 사용하려면 `HandlerInterceptor` 인터페이스를 구현하면 된다.
+        - `preHandle` : 컨트롤러 호출 전 (핸들러 어댑터 호출 전)
+            - 응답값 `true` → 다음으로 진행 / `false` → 진행 X
+        - `postHandle` : 컨트롤러 호출 후 (핸들러 어댑터 호출 후)
+        - `afterCompletion` : 요청 완료 이후 (뷰가 렌더링 된 이후)
+        - 인터셉터는 어떤 컨트롤러(`handler`)가 호출되는지 호출 정보를 받을 수 있다. 그리고 어떤 `modelAndView`가 반환되는지 응답 정보도 받을 수 있다.
+    - 호출 흐름
+        
+        ![image](https://github.com/Springdingdongrami/spring-mvc-2/assets/66028419/0063261d-cdd0-41eb-bde8-e0af38e3634e)
+        
+    - 예외 상황
+        
+        ![image](https://github.com/Springdingdongrami/spring-mvc-2/assets/66028419/bd10fed3-5f2d-42e1-b4b5-c0ea780a847c)
+ 
+        - 컨트롤러에서 예외가 발생하면 `postHandle`은 호출되지 않는다.
+
+### 스프링 인터셉터 - 요청 로그
+
+- 요청 로그 인터셉터
+    - `request.setAttribute(LOG_ID, uuid)` : 서블릿 필터의 경우 지역변수로 해결이 가능하지만, 스프링 인터셉터는 호출 시점이 완전히 분리되어 있다. 따라서 `request`에 담아두었다. 이 값은 `afterCompletion`에서 `request.getAttribute(LOG_ID)`로 찾아서 사용한다.
+    - 핸들러 정보는 어떤 핸들러 매핑을 사용하는가에 따라 달라진다.
+        - 스프링을 사용하면 일반적으로 `@Controller`, `@RequestMapping`을 활용한 핸들러 매핑을 사용하는데, 이 경우 핸들러 정보로 `HandlerMethod` 가 넘어온다.
+        - `/resources/static` 와 같은 정적 리소스가 호출 되는 경우 `ResourceHttpRequestHandler`가 핸들러 정보로 넘어온다.
+
+- 인터셉터 등록
+    - `WebMvcConfigurer`가 제공하는 `addInterceptors()`를 사용해서 인터셉터를 등록할 수 있다.
+    - `registry.addInterceptor(new LogInterceptor())` : 인터셉터를 등록한다.
+    - `order(1)` : 인터셉터의 호출 순서를 지정한다. 낮을 수록 먼저 호출된다.
+    - `addPathPatterns("/**")` : 인터셉터를 적용할 URL 패턴을 지정한다.
+    - `excludePathPatterns("/css/**", "/*.ico", "/error")` : 인터셉터에서 제외할 패턴을 지정한다.
+
+** 스프링의 URL 경로 : [https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/util/pattern/PathPattern.html](https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/web/util/pattern/PathPattern.html)
+
+### 스프링 인터셉터 - 인증 체크
+
+- 인터셉터를 적용하거나 하지 않을 부분은 `addPathPatterns` 와 `excludePathPatterns` 에 작성하면 된다.
+
+### ArgumentResolver 활용
+
+- `ArgumentResolver`를 이용해서 로그인 회원을 편리하게 찾아보자.
+    - HomeController
+        
+        ```java
+        @GetMapping("/")
+        public String homeLoginV3ArgumentResolver(@Login Member loginMember, Model model) {
+            // 로그인 X
+            if (loginMember == null) {
+                return "home";
+            }
+            // 로그인 O
+            model.addAttribute("member", loginMember);
+            return "loginHome";
+        }
+        ```
+        
+    - `@Login` 애노테이션 생성
+        
+        ```java
+        package hello.login.web.argumentresolver;
+        
+        import java.lang.annotation.ElementType;
+        import java.lang.annotation.Retention;
+        import java.lang.annotation.RetentionPolicy;
+        import java.lang.annotation.Target;
+        
+        @Target(ElementType.PARAMETER) // 파라미터에만 사용
+        @Retention(RetentionPolicy.RUNTIME) // 런타임까지 애노테이션 정보가 남아있음
+        public @interface Login {
+        }
+        ```
+        
+    - LoginMemberArgumentResolver
+        
+        ```java
+        package hello.login.web.argumentresolver;
+        
+        import hello.login.web.SessionConst;
+        import hello.login.web.member.Member;
+        import jakarta.servlet.http.HttpServletRequest;
+        import jakarta.servlet.http.HttpSession;
+        import lombok.extern.slf4j.Slf4j;
+        import org.springframework.core.MethodParameter;
+        import org.springframework.web.bind.support.WebDataBinderFactory;
+        import org.springframework.web.context.request.NativeWebRequest;
+        import org.springframework.web.method.support.HandlerMethodArgumentResolver;
+        import org.springframework.web.method.support.ModelAndViewContainer;
+        
+        @Slf4j
+        public class LoginMemberArgumentResolver implements HandlerMethodArgumentResolver {
+        
+            @Override
+            public boolean supportsParameter(MethodParameter parameter) {
+                log.info("supportsParamter 실행");
+        
+                boolean hasLoginAnnotation = parameter.hasParameterAnnotation(Login.class);
+                boolean hasMemberType = Member.class.isAssignableFrom(parameter.getParameterType());
+        
+                return hasLoginAnnotation && hasMemberType;
+            }
+        
+            @Override
+            public Object resolveArgument(MethodParameter parameter, ModelAndViewContainer mavContainer, NativeWebRequest webRequest, WebDataBinderFactory binderFactory) throws Exception {
+                log.info("resolveArgument 실행");
+        
+                HttpServletRequest request = (HttpServletRequest) webRequest.getNativeRequest();
+                HttpSession session = request.getSession(false);
+        
+                if (session == null) {
+                    return null;
+                }
+        
+                return session.getAttribute(SessionConst.LOGIN_MEMBER);
+            }
+        
+        }
+        ```
+        
+        - supportsParamter() : `@Login` 애노테이션이 있으면서 `Member` 타입이면 해당 `ArgumentResolver`가 사용된다.
+        - resolveArgument() : 컨트롤러 호출 직전에 호출 되어서 필요한 파라미터 정보를 생성해준다. 여기서는 세션에 있는 로그인 회원 정보인 `member` 객체를 찾아서 반환해준다. 이후 스프링MVC는 컨트롤러의 메서드를 호출하면서 여기에서 반환된 `member` 객체를 파라미터에 전달해준다.
+    - WebMvcConfigurer에 설정 추가
+        
+        ```java
+        @Configuration
+        public class WebConfig implements WebMvcConfigurer {
+        
+            @Override
+            public void addArgumentResolvers(List<HandlerMethodArgumentResolver> resolvers) {
+                resolvers.add(new LoginMemberArgumentResolver());
+            }
+        
+        }
+        ```
