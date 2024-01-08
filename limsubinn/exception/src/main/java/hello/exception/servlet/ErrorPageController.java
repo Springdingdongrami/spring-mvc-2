@@ -50,7 +50,7 @@ public class ErrorPageController {
         Integer statusCode = (Integer) request.getAttribute(RequestDispatcher.ERROR_STATUS_CODE);
         return new ResponseEntity<>(result, HttpStatus.valueOf(statusCode));
     }
-    
+
     private void printErrorInfo(HttpServletRequest request) {
         log.info("ERROR_EXCEPTION: {}", request.getAttribute(ERROR_EXCEPTION));
         log.info("ERROR_EXCEPTION_TYPE: {}", request.getAttribute(ERROR_EXCEPTION_TYPE));
