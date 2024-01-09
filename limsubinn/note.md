@@ -2408,3 +2408,372 @@ spring.mvc.pathmatch.matching-strategy=ant_path_matcher
     - `server.error.path=/error` : 오류 페이지 경로, 스프링이 자동 등록하는 서블릿 글로벌 오류 페이지 경로와 `BasicErrorController` 오류 컨트롤러 경로에 함께 사용된다.
 
 ** 에러 공통 처리 컨트롤러의 기능을 변경하고 싶으면 `ErrorController` 인터페이스를 상속 받아서 구현하거나 `BasicErrorController` 상속 받아서 기능을 추가하면 된다.
+
+# 9. API 예외 처리
+
+### 시작
+
+- 오류 페이지는 단순히 고객에게 오류 화면을 보여주고 끝이지만, API는 각 오류 상황에 맞는 오류 응답 스펙을 정하고 JSON으로 데이터를 내려주어야 한다.
+    - 단순히 회원을 조회하는 기능을 하나 만들었다. 예외 테스트를 위해 URL에 전달된 `id`의 값이 `ex`이면 예외가 발생하도록 코드를 심어두었다.
+        - 성공
+            
+            ```
+            {
+                "memberId": "spring",
+                "name": "hello spring"
+            }
+            ```
+            
+        - 예외 발생
+            
+            ```
+            <!DOCTYPE HTML>
+            <html>
+                <head>
+                    <meta charset="utf-8">
+                </head>
+                <body>
+                    <div class="container" style="max-width: 600px">
+                        <div class="py-5 text-center">
+                            <h2>500 오류 화면</h2>
+                        </div>
+                        <div>
+                            <p>오류 화면 입니다.</p>
+                        </div>
+                        <hr class="my-4">
+            
+                    </div>
+                    <!-- /container -->
+            
+                </body>
+            </html>
+            ```
+            
+    - API를 요청했는데, 정상의 경우 API로 JSON 형식으로 데이터가 정상 반환된다. 그런데 오류가 발생하면 우리가 미리 만들어둔 오류 페이지 HTML이 반환된다.
+    - 이것은 기대하는 바가 아니다. 클라이언트는 정상 요청이든, 오류 요청이든 JSON이 반환되기를 기대한다. 문제를 해결하려면 오류 페이지 컨트롤러도 JSON 응답을 할 수 있도록 수정해야 한다.
+
+- ErrorPageController - API 응답 추가
+    
+    ```java
+    @RequestMapping(value = "/error-page/500", produces = MediaType.APPLICATION_JSON_VALUE)
+    public ResponseEntity<Map<String, Object>> errorPage500Api(
+            HttpServletRequest request, HttpServletResponse response) {
+        log.info("API errorPage 500");
+    
+        Map<String, Object> result = new HashMap<>();
+        Exception ex = (Exception) request.getAttribute(ERROR_EXCEPTION);
+        result.put("status", request.getAttribute(ERROR_STATUS_CODE));
+        result.put("message", ex.getMessage());
+    
+        Integer statusCode = (Integer) request.getAttribute(RequestDispatcher.ERROR_STATUS_CODE);
+        return new ResponseEntity<>(result, HttpStatus.valueOf(statusCode));
+    }
+    ```
+    
+    - `produces = MediaType.APPLICATION_JSON_VALUE` : 클라이언트가 요청하는 HTTP Header의
+    `Accept`의 값이 `application/json`일 때 해당 메서드가 호출된다는 것
+    - 포스트맨 테스트 → HTTP Header에 Accept가 application/json인 것을 꼭 확인하자.
+        - 결과
+            
+            ```
+            {
+                "message": "잘못된 사용자",
+                "status": 500
+            }
+            ```
+            
+
+### 스프링 부트 기본 오류 처리
+
+- 스프링 부트가 제공하는 `BasicErrorController`
+    
+    ```java
+    @RequestMapping(produces = MediaType.TEXT_HTML_VALUE)
+    public ModelAndView errorHtml(HttpServletRequest request, HttpServletResponse response);
+    
+    @RequestMapping
+    public ResponseEntity<Map<String, Object>> error(HttpServletRequest request);
+    ```
+    
+    - `errorHtml()` : `produces = MediaType.TEXT_HTML_VALUE` : 클라이언트 요청의 Accept 해더 값이 `text/html`인 경우에는 `errorHtml()`을 호출해서 view를 제공한다.
+    - `error()` : 그 외 경우에 호출되고 `ResponseEntity`로 HTTP Body에 JSON 데이터를 반환한다.
+
+- 포스트맨 테스트 → WebServerCustomizer의 @Component 주석 처리
+    
+    ```
+    {
+        "timestamp": "2024-01-08T17:19:14.674+00:00",
+        "status": 500,
+        "error": "Internal Server Error",
+        "exception": "java.lang.RuntimeException",
+        "path": "/api/members/ex"
+    }
+    ```
+    
+
+### HandlerExceptionResolver
+
+- HandlerExceptionResolver
+    - 컨트롤러 밖으로 던져진 예외를 해결하고 동작 방식을 변경하고 싶을 때 사용한다.
+    - 적용 전
+        
+        ![적용 전](https://github.com/Springdingdongrami/spring-mvc-2/assets/66028419/d5a027fc-10b9-40b6-8c45-bb6f73c138b5)
+
+    - 적용 후
+        
+        ![적용 후](https://github.com/Springdingdongrami/spring-mvc-2/assets/66028419/ef5b1411-d144-4b44-8d0c-49f5abd6035d)
+
+    
+    ** `ExceptionResolver`로 예외를 해결해도 `postHandle()`은 호출되지 않는다.
+    
+    - 인터페이스
+        
+        ```java
+        public interface HandlerExceptionResolver {
+           ModelAndView resolveException(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex);
+        }
+        ```
+        
+        - `handler` : 핸들러(컨트롤러) 정보
+        - `Exception ex` : 핸들러(컨트롤러)에서 발생한 발생한 예외
+
+- IllegalArgumentException → 400 에러로 바꾸기
+    - MyHandlerExceptionResolver
+        
+        ```java
+        package hello.exception.resolver;
+        
+        import jakarta.servlet.http.HttpServletRequest;
+        import jakarta.servlet.http.HttpServletResponse;
+        import lombok.extern.slf4j.Slf4j;
+        import org.springframework.web.servlet.HandlerExceptionResolver;
+        import org.springframework.web.servlet.ModelAndView;
+        
+        import java.io.IOException;
+        
+        @Slf4j
+        public class MyHandlerExceptionResolver implements HandlerExceptionResolver {
+        
+            @Override
+            public ModelAndView resolveException(HttpServletRequest request, HttpServletResponse response, Object handler, Exception ex) {
+                try {
+                    if (ex instanceof IllegalArgumentException) {
+                        log.info("IllegalArgumentException resolver to 400");
+                        response.sendError(HttpServletResponse.SC_BAD_REQUEST, ex.getMessage());
+                        return new ModelAndView();
+                    }
+                } catch (IOException e) {
+                    log.error("resolver ex", e);
+                }
+        
+                return null;
+            }
+        
+        }
+        ```
+        
+        - `IllegalArgumentException`이 발생하면 `response.sendError(400)`를 호출해서 HTTP 상태 코드를 400으로 지정하고, 빈 `ModelAndView`를 반환한다.
+        - `response.getWriter().println("hello");`처럼 HTTP 응답 바디에 직접 데이터를 넣어주는 것도 가능하다. 여기에 JSON 으로 응답하면 API 응답 처리를 할 수 있다.
+    - WebConfig - 등록
+        
+        ```java
+        @Override
+        public void extendHandlerExceptionResolvers(List<HandlerExceptionResolver> resolvers) {
+            resolvers.add(new MyHandlerExceptionResolver());
+        }
+        ```
+        
+    - 결과
+        - ExceptionResolver 활용 전
+            
+            ```
+            {
+                "timestamp": "2024-01-08T17:27:52.715+00:00",
+                "status": 500,
+                "error": "Internal Server Error",
+                "exception": "java.lang.IllegalArgumentException",
+                "path": "/api/members/bad"
+            }
+            ```
+            
+        - ExceptionResolver 활용 후
+            
+            ```
+            {
+                "timestamp": "2024-01-08T17:40:47.321+00:00",
+                "status": 400,
+                "error": "Bad Request",
+                "exception": "java.lang.IllegalArgumentException",
+                "path": "/api/members/bad"
+            }
+            ```
+            
+
+- `HandlerExceptionResolver`의 반환 값에 따른 `DispatcherServlet`의 동작 방식
+    - **빈 ModelAndView**: `new ModelAndView()`처럼 빈 `ModelAndView`를 반환하면 뷰를 렌더링 하지 않고, 정상 흐름으로 서블릿이 리턴된다.
+    - **ModelAndView 지정**: `ModelAndView`에 `View`, `Model` 등의 정보를 지정해서 반환하면 뷰를 렌더링 한다.
+    - **null**: `null`을 반환하면, 다음 `ExceptionResolver`를 찾아서 실행한다. 만약 처리할 수 있는
+    `ExceptionResolver`가 없으면 예외 처리가 안되고, 기존에 발생한 예외를 서블릿 밖으로 던진다.
+
+### 스프링이 제공하는 ExceptionResolver 1
+
+- 스프링 부트가 기본으로 제공하는 `ExceptionResolver` - `HandlerExceptionResolverComposite`에 다음 순서로 등록
+    1. `ExceptionHandlerExceptionResolver`
+    2. `ResponseStatusExceptionResolver`
+    3. `DefaultHandlerExceptionResolver`
+
+- ResponseStatusExceptionResolver
+    - 예외에 따라 HTTP 상태 코드를 지정해주는 역할을 한다.
+    - 다음 두 가지 경우를 처리한다.
+        - `@ResponseStatus`가 달려있는 예외 → HTTP 상태 코드를 변경해주고, `reason`을 `MessageSource`에서 찾는다.
+            
+            ```java
+            @GetMapping("/api/response-status-ex1")
+            public String responseStatusEx1() {
+                throw new BadRequestException();
+            }
+            ```
+            
+            ```java
+            package hello.exception.exception;
+            
+            import org.springframework.http.HttpStatus;
+            import org.springframework.web.bind.annotation.ResponseStatus;
+            
+            @ResponseStatus(code = HttpStatus.BAD_REQUEST, reason = "error.bad")
+            public class BadRequestException extends RuntimeException {
+            }
+            ```
+            
+            ```
+            {
+                "timestamp": "2024-01-08T18:27:46.296+00:00",
+                "status": 400,
+                "error": "Bad Request",
+                "exception": "hello.exception.exception.BadRequestException",
+                "message": "잘못된 요청 오류입니다. 메시지 사용",
+                "path": "/api/response-status-ex1"
+            }
+            ```
+            
+        - `ResponseStatusException` 예외 → 개발자가 직접 변경할 수 없는 예외에 적용 및 조건에 따라 동적으로 변경 가능
+            
+            ```java
+            @GetMapping("/api/response-status-ex2")
+            public String responseStatusEx2() {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "error.bad", new IllegalArgumentException());
+            }
+            ```
+            
+            ```
+            {
+                "timestamp": "2024-01-08T18:31:40.916+00:00",
+                "status": 404,
+                "error": "Not Found",
+                "exception": "org.springframework.web.server.ResponseStatusException",
+                "message": "잘못된 요청 오류입니다. 메시지 사용",
+                "path": "/api/response-status-ex2"
+            }
+            ```
+            
+
+### 스프링이 제공하는 ExceptionResolver 2
+
+- DefualtHandlerExceptionResolver
+    - 스프링 내부에서 발생하는 스프링 예외를 해결한다.
+    - 파라미터 바인딩 시점에 타입이 맞지 않으면 내부에서 `TypeMismatchException`이 발생하는데, 이 경우 예외가 발생했기 때문에 그냥 두면 서블릿 컨테이너까지 오류가 올라가고, 결과적으로 500 오류가 발생한다. 그런데 파라미터 바인딩은 대부분 클라이언트가 HTTP 요청 정보를 잘못 호출해서 발생하는 문제이다. HTTP 에서는 이런 경우 HTTP 상태 코드 400을 사용하도록 되어 있다. `DefaultHandlerExceptionResolver`는 이것을 500 오류가 아니라 HTTP 상태 코드 400 오류로 변경한다.
+    - 예시
+        
+        ```java
+        @GetMapping("/api/default-handler-ex")
+        public String defaultException(@RequestParam Integer data) {
+            return "ok";
+        }
+        ```
+        
+        ```
+        {
+            "timestamp": "2024-01-08T18:38:04.772+00:00",
+            "status": 400,
+            "error": "Bad Request",
+            "exception": "org.springframework.web.method.annotation.MethodArgumentTypeMismatchException",
+            "message": "Failed to convert value of type 'java.lang.String' to required type 'java.lang.Integer'; For input string: \"qqq\"",
+            "path": "/api/default-handler-ex"
+        }
+        ```
+        
+        실행 결과를 보면 HTTP 상태 코드가 400인 것을 확인할 수 있다.
+        
+    
+
+### @ExceptionHandler
+
+- API 예외 처리의 어려운 점
+    - `HandlerExceptionResolver`는 `ModelAndView`를 반환해야 한다. 이것은 API 응답에 필요하지 않다.
+    - API 응답을 위해 `HttpServletResponse`에 직접 응답 데이터를 넣어줬다. 이것은 매우 불편하다.
+    - 특정 컨트롤러에서만 발생하는 예외를 별도로 처리하기 어렵다.
+
+- ExceptionHandlerExceptionResolver
+    - `@ExceptionHandler` 을 처리한다. API 예외 처리는 대부분 이 기능으로 해결한다.
+    - 예외 처리 방법
+        - `@ExceptionHandler` 애노테이션을 선언하고, 해당 컨트롤러에서 처리하고 싶은 예외를 지정해주면 된다. 해당 컨트롤러에서 예외가 발생하면 이 메서드가 호출된다.
+        - 다양한 예외를 한번에 처리할 수 있다.
+            
+            ```java
+            @ExceptionHandler({AException.class, BException.class})
+            public String ex(Exception e) {
+            		log.info("exception e", e);
+            }
+            ```
+            
+        - 예외 생략 → 메서드 파라미터의 예외가 지정된다.
+            
+            ```java
+            @ExceptionHandler
+            public ResponseEntity<ErrorResult> userExHandle(UserException e) {
+            }
+            ```
+            
+        - IllegalArgumentException 처리
+            
+            ```java
+            @ResponseStatus(HttpStatus.BAD_REQUEST)
+            @ExceptionHandler(IllegalArgumentException.class)
+            public ErrorResult illegalExHandler(IllegalArgumentException e) {
+                log.error("[exceptionHandler] ex", e);
+                return new ErrorResult("BAD", e.getMessage());
+            }
+            ```
+            
+            ```
+            {
+                "code": "BAD",
+                "message": "잘못된 입력값"
+            }
+            ```
+            
+        - `ModelAndView`를 사용해서 오류 화면(HTML)을 응답하는데 사용할 수도 있다.
+
+### @ControllerAdvice
+
+- `@ControllerAdvice` 또는 `@RestControllerAdvice`를 사용하면 정상 코드와 예외 처리 코드를 분리할 수 있다.
+    - `@ControllerAdvice`는 대상으로 지정한 여러 컨트롤러에 `@ExceptionHandler`, `@InitBinder` 기능을 부여해주는 역할을 한다.
+    - `@ControllerAdvice`에 대상을 지정하지 않으면 모든 컨트롤러에 적용된다. (글로벌 적용)
+    - `@RestControllerAdvice`는 `@ControllerAdvice`와 같고, `@ResponseBody`가 추가되어 있다.
+
+- 대상 컨트롤러 지정 방법
+    
+    ```java
+    // Target all Controllers annotated with @RestController
+    @ControllerAdvice(annotations = RestController.class)
+    public class ExampleAdvice1 {}
+    
+    // Target all Controllers within specific packages
+    @ControllerAdvice("org.example.controllers")
+    public class ExampleAdvice2 {}
+    
+    // Target all Controllers assignable to specific classes
+    @ControllerAdvice(assignableTypes = {ControllerInterface.class, 
+    AbstractController.class})
+    public class ExampleAdvice3 {}
+    ```
