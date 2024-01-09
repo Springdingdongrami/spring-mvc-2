@@ -27,7 +27,7 @@ public class ApiExceptionController {
             throw new IllegalArgumentException("잘못된 입력값");
         }
 
-        if (id.equals("user-dx")) {
+        if (id.equals("user-ex")) {
             throw new UserException("사용자 오류");
         }
 
