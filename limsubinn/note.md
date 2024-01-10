@@ -2777,3 +2777,225 @@ spring.mvc.pathmatch.matching-strategy=ant_path_matcher
     AbstractController.class})
     public class ExampleAdvice3 {}
     ```
+
+# 10. 스프링 타입 컨버터
+
+### 프로젝트 생성
+
+- Gradle Project
+- Packaging: Jar
+- Dependencies: Srping Web, Lombok, Thymeleaf
+
+### 스프링 타입 컨버터 소개
+
+- HTTP 요청 파라미터는 모두 문자로 처리된다. 따라서 요청 파라미터를 자바에서 다른 타입으로 변환해서 사용하고 싶으면 숫자 타입으로 변환하는 과정을 거쳐야 한다.
+    
+    ```java
+    @GetMapping("/hello-v1")
+    public String helloV1(HttpServletRequest request) {
+        String data = request.getParameter("data"); // 문자 타입으로 조회
+        Integer intValue = Integer.valueOf(data); // 숫자 타입으로 변경
+        System.out.println("intValue = " + intValue);
+        return "ok";
+    }
+    ```
+    
+
+- 스프링이 제공하는 `@RequestParam`을 이용하면 문자를 `Integer` 타입의 숫자로 편리하게 받을 수 있다. 이것은 스프링이 중간에서  타입을 변환해주었기 때문이다. `@ModelAttribute`, `@PathVariable`에서도 확인할 수 있다.
+    
+    ```java
+    @GetMapping("/hello-v2")
+    public String helloV2(@RequestParam Integer data) {
+        System.out.println("data = " + data);
+        return "ok";
+    }
+    ```
+    
+
+- 컨버터 인터페이스
+    
+    ```java
+    package org.springframework.core.convert.converter;
+    
+    public interface Converter<S, T> {
+        T convert(S source);
+    }
+    ```
+    
+    - 개발자는 스프링에 추가적인 타입 변환이 필요하면 컨버터 인터페이스를 구현해서 등록하면 된다
+    - 컨버터 인터페이스는 모든 타입에 적용할 수 있다. 필요하면 X → Y 타입으로 변환하는 컨버터 인터페이스를 만들고, 또 Y → X 타입으로 변환하는 컨버터 인터페이스를 만들어서 등록하면 된다.
+
+### 컨버전 서비스 - ConversionService
+
+- ConversionService
+    - 타입 컨버터를 하나하나 직접 찾아서 타입 변환에 사용하는 것은 매우 불편하다. 그래서 스프링은 개별 컨버터를 모아두고 그것들을 묶어서 편리하게 사용할 수 있는 기능을 제공한다.
+    - 인터페이스
+        
+        ```java
+        package org.springframework.core.convert;
+        
+        import org.springframework.lang.Nullable;
+        
+        public interface ConversionService {
+        
+        		boolean canConvert(@Nullable Class<?> sourceType, Class<?> targetType);
+        		boolean canConvert(@Nullable TypeDescriptor sourceType, TypeDescriptor targetType);
+        
+        		<T> T convert(@Nullable Object source, Class<T> targetType);
+        		Object convert(@Nullable Object source, @Nullable TypeDescriptor sourceType, TypeDescriptor targetType);
+        
+        }
+        ```
+        
+
+- 등록과 사용 분리
+    - 컨버터를 등록할 때는 StringToIntegerConverter 같은 타입 컨버터를 명확하게 알아야 한다.
+    - 반면에 컨버터를 사용하는 입장에서는 타입 컨버터를 전혀 몰라도 된다. 타입 컨버터들은 모두 컨버전 서비스 내부에 숨어서 제공된다.
+    - 따라서 타입을 변환을 원하는 사용자는 컨버전 서비스 인터페이스에만 의존하면 된다. 물론 컨버전 서비스를 등록하는 부분과 사용하는 부분을 분리하고 의존관계 주입을 사용해야 한다.
+    - 등록
+        
+        ```java
+        DefaultConversionService conversionService = new DefaultConversionService();
+        conversionService.addConverter(new StringToIntegerConverter());
+        conversionService.addConverter(new IntegerToStringConverter());
+        conversionService.addConverter(new StringToIpPortConverter());
+        conversionService.addConverter(new IpPortToStringConverter());
+        ```
+        
+    - 사용
+        
+        ```java
+        assertThat(conversionService.convert("10", Integer.class)).isEqualTo(10);
+        assertThat(conversionService.convert(10, String.class)).isEqualTo("10");
+        assertThat(conversionService.convert("127.0.0.1:8080", IpPort.class)).isEqualTo(new IpPort("127.0.0.1", 8080));
+        assertThat(conversionService.convert(new IpPort("127.0.0.1", 8080), String.class)).isEqualTo("127.0.0.1:8080");
+        ```
+        
+
+- 인터페이스 분리 원칙 ISP
+    - 인터페이스 분리 원칙은 클라이언트가 자신이 이용하지 않는 메서드에 의존하지 않아야 한다.
+    - `DefaultConversionService`는 다음 두 인터페이스를 구현했다.
+        - `ConversionService` : 컨버터 사용에 초점
+        - `ConverterRegistry` : 컨버터 등록에 초점
+    - 이렇게 인터페이스를 분리하면 컨버터를 사용하는 클라이언트와 컨버터를 등록하고 관리하는 클라이언트의 관심사를 명확하게 분리할 수 있다.
+
+### 스프링에 Converter 적용하기
+
+- WebConfig - 컨버터 등록
+    
+    ```java
+    package hello.typeconverter;
+    
+    import hello.typeconverter.converter.IntegerToStringConverter;
+    import hello.typeconverter.converter.IpPortToStringConverter;
+    import hello.typeconverter.converter.StringToIntegerConverter;
+    import hello.typeconverter.converter.StringToIpPortConverter;
+    import org.springframework.context.annotation.Configuration;
+    import org.springframework.format.FormatterRegistry;
+    import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+    
+    @Configuration
+    public class WebConfig implements WebMvcConfigurer {
+    
+        @Override
+        public void addFormatters(FormatterRegistry registry) {
+            registry.addConverter(new StringToIntegerConverter());
+            registry.addConverter(new IntegerToStringConverter());
+            registry.addConverter(new StringToIpPortConverter());
+            registry.addConverter(new IpPortToStringConverter());
+        }
+    
+    }
+    ```
+    
+    - `http://localhost:8080/hello-v2?data=10` 실행 → 문자를 Integer로 변환하는 과정이 필요하다. 실행해보면 직접 등록한 `StringToIntegerConverter`가 작동하는 것을 확인할 수 있다.
+        
+        ![image](https://github.com/Springdingdongrami/spring-mvc-2/assets/66028419/057243aa-c711-4194-8c47-45941012b4e5)
+      
+        그런데 `StringToIntegerConverter`를 등록하기 전에도 이 코드는 잘 수행되었다. 그것은 **스프링이 내부에서 수많은 기본 컨버터들을 제공**하기 때문이다. 컨버터를 추가하면 추가한 컨버터가 기본 컨버터보다 높은 우선순위를 가진다.
+        
+    - String → IpPort
+        
+        ```java
+        @GetMapping("ip-port")
+        public String ipPort(@RequestParam IpPort ipPort) {
+            System.out.println("ipPort.getIp() = " + ipPort.getIp());
+            System.out.println("ipPort.getPort() = " + ipPort.getPort());
+            return "ok";
+        }
+        ```
+        
+        `http://localhost:8080/ip-port?ipPort=127.0.0.1:8080` 실행
+        
+        ![image](https://github.com/Springdingdongrami/spring-mvc-2/assets/66028419/58695ab2-6fc8-4e26-afa4-d4879b73a981)
+
+        
+### 뷰 템플릿에 컨버터 적용하기
+
+- 타임리프는 렌더링 시에 컨버터를 적용해서 렌더링 하는 방법을 편리하게 지원한다.
+    - 타임리프는 `${{...}}` 를 사용하면 자동으로 컨버전 서비스를 사용해서 변환된 결과를 출력해준다.
+        - 변수 표현식 : `${…}`
+        - 컨버전 서비스 적용 : `${{…}}`
+    - 타임리프의 `th:field`는  `id` ,`name`을 출력하는 등 다양한 기능이 있는데, 여기에 컨버전 서비스 도 함께 적용된다.
+
+### 포맷터 - Formatter
+
+- `Formatter`
+    - 객체를 특정한 포맷에 맞춰 문자로 출력하거나 또는 그 반대의 역할을 하는 것에 특화된 기능
+    - Converter vs Formatter
+        - 컨버터는 범용(객체 → 객체)
+        - 포맷터는 문자에 특화(객체 → 문자, 문자 → 객체) + 현지화(Locale)
+    - 인터페이스
+        
+        ```java
+        public interface Printer<T> {
+             String print(T object, Locale locale);
+        }
+         public interface Parser<T> {
+             T parse(String text, Locale locale) throws ParseException;
+        }
+        
+        public interface Formatter<T> extends Printer<T>, Parser<T> {
+        }
+        ```
+        
+
+- `"1,000"` 처럼 숫자 중간의 쉼표를 적용하려면 자바가 기본으로 제공하는 `NumberFormat` 객체를 사용하면 된다. 이 객체는 `Locale` 정보를 활용해서 나라별로 다른 숫자 포맷을 만들어준다.
+    - `parse()`를 사용해서 문자를 숫자로 변환한다. 참고로 `Number` 타입은 `Integer`, `Long`과 같은 숫자 타입의 부모 클래스이다.
+    - `print()`를 사용해서 객체를 문자로 변환한다.
+
+### 포맷터를 지원하는 컨버전 서비스
+
+- 포맷터를 지원하는 컨버전 서비스를 사용하면 컨버전 서비스에 포맷터를 추가할 수 있다. 내부에서 어댑터 패턴을 사용해서 `Formatter`가 `Converter`처럼 동작하도록 지원한다.
+    - `FormattingConversionService` 는 포맷터를 지원하는 컨버전 서비스이다.
+    - `DefaultFormattingConversionService`는 `FormattingConversionService`에 기본적인 통화, 숫자 관련 몇 가지 기본 포맷터를 추가해서 제공한다.
+    - `FormattingConversionService`는 `ConversionService` 관련 기능을 상속받기 때문에 결과적으로 컨버터와 포맷터 모두 등록할 수 있다. 그리고 사용할 때는 `ConversionService`가 제공하는 `convert`를 사용하면 된다.
+
+### 포맷터 적용하기
+
+- WebConfig - 포맷터 등록, 컨버터 주석 처리
+    
+    ```java
+    @Override
+    public void addFormatters(FormatterRegistry registry) {
+        // 우선순위를 가지기 때문에 주석 처리
+    //  registry.addConverter(new StringToIntegerConverter());
+    //  registry.addConverter(new IntegerToStringConverter());
+        registry.addConverter(new StringToIpPortConverter());
+        registry.addConverter(new IpPortToStringConverter());
+    
+        // 추가
+        registry.addFormatter(new MyNumberFormatter());
+    }
+    ```
+    
+    - 컨버전 서비스를 적용한 결과 `MyNumberFormatter`가 적용되어서 `10,000` 문자가 출력된 것을 확인할 수 있다.
+        
+        ![image](https://github.com/Springdingdongrami/spring-mvc-2/assets/66028419/f77d8fdf-f20d-45eb-b8cb-d8650ea5790f)
+   
+
+### 스프링이 제공하는 기본 포맷터
+
+- 포맷터는 기본 형식이 지정되어 있기 때문에, 객체의 각 필드마다 다른 형식으로 포맷을 지정하기는 어렵다. → 스프링은 이런 문제를 해결하기 위해 애노테이션 기반으로 원하는 형식을 지정해서 사용할 수 있는 포맷터 두 가지를 기본으로 제공한다.
+    - `@NumberFormat` : 숫자 관련 형식 지정 포맷터 사용, `NumberFormatAnnotationFormatterFactory`
+    - `@DateTimeFormat` : 날짜 관련 형식 지정 포맷터 사용, `Jsr310DateTimeFormatAnnotationFormatterFactory`
