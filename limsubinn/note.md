@@ -1,3 +1,5 @@
+POSTMAN 주소: https://documenter.getpostman.com/view/25554684/2s9YsMABcy 
+
 # 1. 타임리프 - 기본 기능
 
 ### 프로젝트 생성
@@ -2999,3 +3001,89 @@ spring.mvc.pathmatch.matching-strategy=ant_path_matcher
 - 포맷터는 기본 형식이 지정되어 있기 때문에, 객체의 각 필드마다 다른 형식으로 포맷을 지정하기는 어렵다. → 스프링은 이런 문제를 해결하기 위해 애노테이션 기반으로 원하는 형식을 지정해서 사용할 수 있는 포맷터 두 가지를 기본으로 제공한다.
     - `@NumberFormat` : 숫자 관련 형식 지정 포맷터 사용, `NumberFormatAnnotationFormatterFactory`
     - `@DateTimeFormat` : 날짜 관련 형식 지정 포맷터 사용, `Jsr310DateTimeFormatAnnotationFormatterFactory`
+ 
+# 11. 파일 업로드
+
+### 소개
+
+- HTML 폼 전송 방식
+    - `application/x-www-form-urlencoded`
+        
+        ![image](https://github.com/Springdingdongrami/spring-mvc-2/assets/66028419/508b8b51-ff11-4863-a8dc-0a82fe2262e5)
+
+        - HTML 폼 데이터를 서버로 전송하는 가장 기본적인 방법
+        - Form 태그에 별도의 enctype 옵션이 없으면 웹 브라우저는 요청 HTTP 메시지의 헤더에 `Content-Type: application/x-www-form-urlencoded`를 추가한다.
+        - 폼에 입력한 전송할 항목을 HTTP Body에 문자로 `username=kim&age=20`와 같이 `&`로 구분해서 전송한다.
+        - 파일을 전송하기 힘들다. (파일을 업로드 하려면 문자가 아닌 바이너리 데이터를 전송해야 한다.)
+    - `multipart/form-data`
+        
+        ![image](https://github.com/Springdingdongrami/spring-mvc-2/assets/66028419/d9c59c22-9e97-4c80-b1b1-cbe1af27864c)
+
+        - 방식을 사용하려면 Form 태그에 별도의 `enctype="multipart/form-data"`를 지정해야 한다.
+        - 다른 종류의 여러 파일과 폼의 내용 함께 전송할 수 있다.
+        - 폼의 입력 결과로 생성된 HTTP 메시지를 보면 `Content-Disposition`이라는 항목별 헤더가 추가되어 있고 여기에 부가 정보가 있다. 폼의 일반 데이터는 각 항목별로 문자가 전송되고, 파일의 경우 파일 이름과 Content-Type이 추가되고 바이너리 데이터가 전송된다.
+        - `multipart/form-data`는 이렇게 각각의 항목을 구분해서 한번에 전송하는 것이다.
+
+### 프로젝트 생성
+
+- Gradle Project
+- Packaging: Jar
+- Dependencies: Spring Web, Lombok, Thymeleaf
+
+### 서블릿과 파일 업로드 1
+
+- `request.getParts()`
+    - `multipart/form-data` 전송 방식에서 각각 나누어진 부분을 받아서 확인할 수 있다.
+
+- 멀티파트 사용 옵션
+    - 업로드 사이즈 제한 - 사이즈를 넘으면 예외(`SizeLimitExceededException`)가 발생한다
+        
+        ```
+        spring.servlet.multipart.max-file-size=1MB
+        spring.servlet.multipart.max-request-size=10MB
+        ```
+        
+    - 멀티파트 관련 처리 요청 끄기 (기본값 true)
+        
+        ```
+        spring.servlet.multipart.enabled=false
+        ```
+        
+
+### 서블릿과 파일 업로드 2
+
+- 파일을 업로드 하려면 실제 파일을 저장하는 경로가 필요하다.
+    - 해당 경로에 실제 폴더를 만들어두고, 만들어진 경로를 `application.properties` 파일에 입력해둔다.
+        
+        ```
+        file.dir=경로
+        ```
+        
+        ** 마지막에 `/`(슬래시)가 포함된 것에 주의
+        
+
+- 멀티파트 형식은 전송 데이터를 하나하나 각각 부분( `Part`)으로 나누어 전송한다. `parts`에는 이렇게 나누어진 데이터가 각각 담긴다. 서블릿이 제공하는 `Part`는 멀티파트 형식을 편리하게 읽을 수 있는 다양한 메서드를 제공한다.
+    - `part.getSubmittedFileName()` : 클라이언트가 전달한 파일명
+    - `part.getInputStream()` : Part의 전송 데이터를 읽을 수 있다.
+    - `part.write(...)` : Part를 통해 전송된 데이터를 저장할 수 있다
+
+- 서블릿이 제공하는 `Part`는 편하기는 하지만, `HttpServletRequest`를 사용해야 하고, 추가로 파일 부분만 구분하려면 여러가지 코드를 넣어야 한다.
+
+### 스프링과 파일 업로드
+
+- MultipartFile
+    - `@RequestParam MultipartFile file` : 업로드하는 HTML Form의 name에 맞춰 `@RequestParam`을 적용하면 된다. 추가로 `@ModelAttribute`에서도 MultipartFile을 동일하게 사용할 수 있다.
+    - `file.getOriginalFilename()` : 업로드 파일 명
+    - `file.transferTo(…)` : 파일 저장
+
+### 예제로 구현하는 파일 업로드, 다운로드
+
+- 요구사항
+    - 상품 관리
+        - 이름
+        - 첨부파일 한 개
+        - 이미지파일 여러 개
+    - 첨부파일을 업로드, 다운로드 할 수 있다.
+    - 업로드한 이미지를 웹 브라우저에서 확인할 수 있다.
+
+** 고객이 업로드한 파일명으로 서버 내부에 파일을 저장하면 안 된다. 왜냐하면 서로 다른 고객이 같은 파일 이름을 업로드 하는 경우 기존 파일 이름과 충돌이 일어날 수 있다. 서버에서는 저장할 파일명이 겹치지 않도록 내부에서 관리하는 별도의 파일명이 필요하다.
